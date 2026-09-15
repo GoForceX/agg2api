@@ -1,0 +1,34 @@
+# agg2api deployment.
+#
+#   cp .env.example .env      # then set AGG2API_ADMIN_TOKEN
+#   docker compose up -d
+#
+# The gateway is stateful in exactly one way: the SQLite database holding providers,
+# routes, keys and usage. That lives on a named volume so `compose up` never loses it.
+
+services:
+  agg2api:
+    build:
+      context: .
+    image: agg2api:latest
+    restart: unless-stopped
+
+    # Bind to localhost by default. Publishing on 0.0.0.0 exposes an LLM gateway that
+    # holds provider credentials; put TLS and auth in front of it before doing that,
+    # or change this to "8787:8787" deliberately.
+    ports:
+      - "127.0.0.1:8787:8787"
+
+    env_file:
+      - .env
+
+    volumes:
+      # Providers, routes, API keys and the usage log.
+      - agg2api-data:/app/data
+
+    # The image's HEALTHCHECK reports 503 until a provider and a route exist, which is
+    # correct but would make `docker compose ps` show "unhealthy" on a fresh install.
+    # It becomes healthy as soon as you add a provider.
+
+volumes:
+  agg2api-data:

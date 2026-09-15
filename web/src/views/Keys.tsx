@@ -1,0 +1,283 @@
+import { useState } from "react"
+import { useMutation } from "@tanstack/react-query"
+import { api, errorMessage } from "../lib/api.ts"
+import { formatAgo, formatDateTime, formatInt } from "../lib/format.ts"
+import { fromLines, toLines } from "../lib/forms.ts"
+import { useAdminConfig, useRefreshAdmin } from "../lib/queries.ts"
+import type { ApiKeyInput, ApiKeyMasked } from "../lib/types.ts"
+import { Badge, Banner, Card, ConfirmButton, ErrorPanel, Field, Loading, Modal, Toggle } from "../components/ui.tsx"
+
+type KeyDraft = {
+  name: string
+  enabled: boolean
+  rate_limit_rpm: string
+  allowed_models: string
+}
+
+const EMPTY_KEY: KeyDraft = { name: "", enabled: true, rate_limit_rpm: "0", allowed_models: "" }
+
+export function KeysView() {
+  const config = useAdminConfig()
+  const refresh = useRefreshAdmin()
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<ApiKeyMasked | null>(null)
+  /** The secret is returned by create only, and never refetched. */
+  const [revealed, setRevealed] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const toggleEnabled = useMutation({
+    mutationFn: (input: { key: ApiKeyMasked; enabled: boolean }) =>
+      api.updateKey(input.key.id, { name: input.key.name, enabled: input.enabled }),
+    onSuccess: () => void refresh(),
+    onError: (error) => setNotice(errorMessage(error))
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.deleteKey(id),
+    onSuccess: () => void refresh(),
+    onError: (error) => setNotice(errorMessage(error))
+  })
+
+  if (config.isPending) return <Loading label="Loading keys" />
+  if (config.isError) return <ErrorPanel error={config.error} onRetry={() => void config.refetch()} />
+
+  const settings = config.data.settings
+
+  return (
+    <div className="stack">
+      <div className="view-head">
+        <h1>API keys</h1>
+        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+          New key
+        </button>
+      </div>
+
+      {notice !== null ? <Banner message={notice} onDismiss={() => setNotice(null)} /> : null}
+
+      <p className="muted small">
+        {settings.require_client_key
+          ? "Client keys are required: requests without a valid key are rejected."
+          : "Client keys are optional: unknown callers are admitted, but keys still carry rate limits and model allowlists."}{" "}
+        A rate limit of 0 means unlimited.
+      </p>
+
+      {revealed !== null ? (
+        <Card title="Copy the new key now" subtitle="The secret is shown once, on creation, and never returned again." padded>
+          <div className="copy-row">
+            <input className="input mono" value={revealed} readOnly onFocus={(event) => event.currentTarget.select()} />
+          </div>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(revealed)
+                  .catch(() => setNotice("Clipboard unavailable — select the field and copy manually."))
+              }}
+            >
+              Copy
+            </button>
+            <button type="button" className="btn" onClick={() => setRevealed(null)}>
+              Done
+            </button>
+          </div>
+        </Card>
+      ) : null}
+
+      <Card title={`${config.data.keys.length} keys`}>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Key</th>
+                <th>Enabled</th>
+                <th className="num">RPM</th>
+                <th>Allowed models</th>
+                <th className="num">Requests</th>
+                <th>Last used</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {config.data.keys.length === 0 ? (
+                <tr>
+                  <td className="empty" colSpan={8}>
+                    No keys yet.
+                  </td>
+                </tr>
+              ) : null}
+              {config.data.keys.map((key) => (
+                <tr key={key.id}>
+                  <td>
+                    <div className="cell-title">{key.name}</div>
+                    <div className="muted small">created {formatDateTime(key.created_at)}</div>
+                  </td>
+                  <td className="mono small">{key.masked}</td>
+                  <td>
+                    <Toggle
+                      checked={key.enabled}
+                      ariaLabel={`Enable ${key.name}`}
+                      onChange={(enabled) => toggleEnabled.mutate({ key, enabled })}
+                    />
+                  </td>
+                  <td className="num">{key.rate_limit_rpm === 0 ? "unlimited" : formatInt(key.rate_limit_rpm)}</td>
+                  <td>
+                    {key.allowed_models.length === 0 ? (
+                      <span className="muted small">all models</span>
+                    ) : (
+                      <span className="tag-list">
+                        {key.allowed_models.map((model) => (
+                          <Badge key={model} tone="neutral">
+                            {model}
+                          </Badge>
+                        ))}
+                      </span>
+                    )}
+                  </td>
+                  <td className="num">{formatInt(key.total_requests)}</td>
+                  <td className="small">{formatAgo(key.last_used_at)}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button type="button" className="btn btn-small" onClick={() => setEditing(key)}>
+                        Edit
+                      </button>
+                      <ConfirmButton onConfirm={() => remove.mutate(key.id)} label="Delete" confirmLabel="Confirm delete" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {creating ? (
+        <KeyForm
+          title="New key"
+          draft={EMPTY_KEY}
+          onClose={() => setCreating(false)}
+          onCreated={(created) => {
+            setCreating(false)
+            if (created.key !== undefined && created.key.length > 0) setRevealed(created.key)
+            void refresh()
+          }}
+        />
+      ) : null}
+
+      {editing !== null ? (
+        <KeyForm
+          title={`Edit ${editing.name}`}
+          draft={{
+            name: editing.name,
+            enabled: editing.enabled,
+            rate_limit_rpm: String(editing.rate_limit_rpm),
+            allowed_models: toLines(editing.allowed_models)
+          }}
+          keyId={editing.id}
+          onClose={() => setEditing(null)}
+          onCreated={() => {
+            setEditing(null)
+            void refresh()
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function KeyForm({
+  title,
+  draft,
+  keyId,
+  onClose,
+  onCreated
+}: {
+  title: string
+  draft: KeyDraft
+  keyId?: number
+  onClose: () => void
+  onCreated: (created: ApiKeyMasked & { key?: string }) => void
+}) {
+  const [form, setForm] = useState<KeyDraft>(draft)
+  const [error, setError] = useState<string | null>(null)
+
+  const patch = (changes: Partial<KeyDraft>) => setForm((current) => ({ ...current, ...changes }))
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const name = form.name.trim()
+      if (name.length === 0) throw new Error("Name is required")
+      const rpm = Number(form.rate_limit_rpm.trim())
+      const input: ApiKeyInput = {
+        name,
+        enabled: form.enabled,
+        rate_limit_rpm: Number.isFinite(rpm) && rpm >= 0 ? Math.floor(rpm) : 0,
+        allowed_models: fromLines(form.allowed_models)
+      }
+      return keyId === undefined ? api.createKey(input) : api.updateKey(keyId, input)
+    },
+    onSuccess: onCreated,
+    onError: (failure) => setError(errorMessage(failure))
+  })
+
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : keyId === undefined ? "Create" : "Save"}
+          </button>
+        </>
+      }
+    >
+      {error !== null ? <Banner tone="bad" message={error} onDismiss={() => setError(null)} /> : null}
+
+      <div className="form-grid">
+        <Field label="Name">
+          <input
+            className="input"
+            value={form.name}
+            placeholder="prod-app"
+            onChange={(event) => patch({ name: event.currentTarget.value })}
+          />
+        </Field>
+
+        <Field label="Rate limit" hint="Requests per minute; 0 = unlimited">
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={form.rate_limit_rpm}
+            onChange={(event) => patch({ rate_limit_rpm: event.currentTarget.value })}
+          />
+        </Field>
+
+        <Field label="Allowed models" hint="One glob per line; empty allows every public model">
+          <textarea
+            className="input mono"
+            rows={4}
+            value={form.allowed_models}
+            placeholder={"gpt-4o\nclaude-*"}
+            spellCheck={false}
+            onChange={(event) => patch({ allowed_models: event.currentTarget.value })}
+          />
+        </Field>
+      </div>
+
+      <Toggle checked={form.enabled} label="Enabled" onChange={(enabled) => patch({ enabled })} />
+
+      {keyId === undefined ? (
+        <p className="muted small">Leave the secret blank and the gateway generates one, shown once after creation.</p>
+      ) : (
+        <p className="muted small">The key secret itself cannot be changed or re-read; delete and recreate to rotate.</p>
+      )}
+    </Modal>
+  )
+}

@@ -1,0 +1,316 @@
+/**
+ * Domain records: providers, routes, client keys, usage.
+ *
+ * These schemas are simultaneously the SQLite row mapping, the admin API
+ * contract, and the types the gateway core operates on. One definition, so the
+ * UI can never drift from what the server stores.
+ */
+import * as Schema from "effect/Schema"
+
+/** Upstream protocol family. */
+export const ProviderKind = Schema.Literal("openai-chat", "openai-responses", "workbuddy2api")
+export type ProviderKind = typeof ProviderKind.Type
+
+/** How to pick among several providers serving the same public model. */
+export const RoutingStrategy = Schema.Literal("priority", "weighted")
+export type RoutingStrategy = typeof RoutingStrategy.Type
+
+export const StringMap = Schema.Record({ key: Schema.String, value: Schema.String })
+
+// --- provider --------------------------------------------------------------
+
+/** A provider as stored and edited. `api_key` is write-only in the admin API. */
+export const Provider = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  kind: ProviderKind,
+  /** Origin without a trailing slash, e.g. `https://api.openai.com`. */
+  base_url: Schema.String,
+  api_key: Schema.String,
+  headers: StringMap,
+  /** Higher wins under `priority`; doubles as the weight under `weighted`. */
+  priority: Schema.Number,
+  enabled: Schema.Boolean,
+  /** Upstream model id → public model id, applied after discovery. */
+  model_rename: StringMap,
+  /** Glob allowlist for discovered ids; empty means "allow everything". */
+  model_allow: Schema.Array(Schema.String),
+  /** Glob denylist, applied after the allowlist. */
+  model_deny: Schema.Array(Schema.String),
+  /** Cost per 1M prompt tokens. `null` = unknown, reported as unpriced. */
+  input_price: Schema.NullOr(Schema.Number),
+  output_price: Schema.NullOr(Schema.Number),
+  currency: Schema.String,
+  /**
+   * Extra in-provider attempts on a retryable failure before the router moves on.
+   * `0` (default) fails over to the next provider immediately.
+   */
+  max_retries: Schema.Number,
+  created_at: Schema.Number,
+  updated_at: Schema.Number
+})
+export type Provider = typeof Provider.Type
+
+/** Fields an operator may set. Absent = leave unchanged on update. */
+export const ProviderInput = Schema.Struct({
+  name: Schema.String,
+  kind: ProviderKind,
+  base_url: Schema.String,
+  api_key: Schema.optional(Schema.String),
+  headers: Schema.optional(StringMap),
+  priority: Schema.optional(Schema.Number),
+  enabled: Schema.optional(Schema.Boolean),
+  model_rename: Schema.optional(StringMap),
+  model_allow: Schema.optional(Schema.Array(Schema.String)),
+  model_deny: Schema.optional(Schema.Array(Schema.String)),
+  input_price: Schema.optional(Schema.NullOr(Schema.Number)),
+  output_price: Schema.optional(Schema.NullOr(Schema.Number)),
+  currency: Schema.optional(Schema.String),
+  max_retries: Schema.optional(Schema.Number)
+})
+export type ProviderInput = typeof ProviderInput.Type
+
+/** A model discovered on a provider. */
+export const DiscoveredModel = Schema.Struct({
+  provider_id: Schema.Number,
+  upstream_id: Schema.String,
+  public_id: Schema.String,
+  context_length: Schema.NullOr(Schema.Number),
+  max_output_tokens: Schema.NullOr(Schema.Number),
+  supports_images: Schema.Boolean,
+  owned_by: Schema.NullOr(Schema.String),
+  last_seen: Schema.Number
+})
+export type DiscoveredModel = typeof DiscoveredModel.Type
+
+/** One account inside a workbuddy2api upstream. */
+export const CreditsAccount = Schema.Struct({
+  uid: Schema.String,
+  nickname: Schema.optional(Schema.String),
+  realm: Schema.optional(Schema.String),
+  credits: Schema.Number,
+  cooling: Schema.optional(Schema.Boolean),
+  disabled: Schema.optional(Schema.Boolean),
+  disabled_reason: Schema.optional(Schema.String)
+})
+export type CreditsAccount = typeof CreditsAccount.Type
+
+/** workbuddy2api credit snapshot: the aggregated total plus per-account detail. */
+export const Credits = Schema.Struct({
+  provider_id: Schema.Number,
+  total: Schema.Number,
+  healthy: Schema.Number,
+  accounts: Schema.Array(CreditsAccount),
+  fetched_at: Schema.Number,
+  error: Schema.NullOr(Schema.String)
+})
+export type Credits = typeof Credits.Type
+
+/** Runtime breaker state for a provider. */
+export const ProviderStatus = Schema.Struct({
+  provider_id: Schema.Number,
+  consecutive_failures: Schema.Number,
+  /** Epoch ms until the breaker reopens the provider; 0 = healthy. */
+  open_until: Schema.Number,
+  last_error: Schema.NullOr(Schema.String),
+  last_error_at: Schema.Number,
+  last_success_at: Schema.Number,
+  last_latency_ms: Schema.Number
+})
+export type ProviderStatus = typeof ProviderStatus.Type
+
+export const EMPTY_STATUS: ProviderStatus = {
+  provider_id: 0,
+  consecutive_failures: 0,
+  open_until: 0,
+  last_error: null,
+  last_error_at: 0,
+  last_success_at: 0,
+  last_latency_ms: 0
+}
+
+// --- routes ----------------------------------------------------------------
+
+/** One (provider, upstream model) pair capable of serving a public model. */
+export const RouteTarget = Schema.Struct({
+  provider_id: Schema.Number,
+  upstream_model: Schema.String,
+  priority: Schema.Number,
+  enabled: Schema.Boolean
+})
+export type RouteTarget = typeof RouteTarget.Type
+
+export const Route = Schema.Struct({
+  public_model: Schema.String,
+  /** `null` = inherit the gateway default strategy. */
+  strategy: Schema.NullOr(RoutingStrategy),
+  enabled: Schema.Boolean,
+  display_name: Schema.NullOr(Schema.String),
+  targets: Schema.Array(RouteTarget),
+  created_at: Schema.Number,
+  updated_at: Schema.Number
+})
+export type Route = typeof Route.Type
+
+export const RouteInput = Schema.Struct({
+  public_model: Schema.String,
+  strategy: Schema.optional(Schema.NullOr(RoutingStrategy)),
+  enabled: Schema.optional(Schema.Boolean),
+  display_name: Schema.optional(Schema.NullOr(Schema.String)),
+  targets: Schema.Array(RouteTarget)
+})
+export type RouteInput = typeof RouteInput.Type
+
+// --- client keys -----------------------------------------------------------
+
+export const ApiKey = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  /** Only present in creation responses; list/detail mask it. */
+  key: Schema.String,
+  enabled: Schema.Boolean,
+  /** Requests per minute allowed; 0 = unlimited. */
+  rate_limit_rpm: Schema.Number,
+  allowed_models: Schema.Array(Schema.String),
+  created_at: Schema.Number,
+  last_used_at: Schema.Number,
+  total_requests: Schema.Number
+})
+export type ApiKey = typeof ApiKey.Type
+
+export const ApiKeyInput = Schema.Struct({
+  name: Schema.String,
+  /** Omit to have the gateway generate one. */
+  key: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+  rate_limit_rpm: Schema.optional(Schema.Number),
+  allowed_models: Schema.optional(Schema.Array(Schema.String))
+})
+export type ApiKeyInput = typeof ApiKeyInput.Type
+
+/**
+ * A client key as returned by creation — the only time the secret is revealed.
+ *
+ * The secret must be shown exactly once, at creation, because it cannot be recovered
+ * afterwards: the list and detail views return only `masked`. Without this the UI could
+ * not tell the operator what to paste into their client, and the key would be unusable.
+ * Update responses deliberately use `ApiKeyMasked` so a routine edit cannot leak it.
+ */
+export const ApiKeyCreated = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  masked: Schema.String,
+  /** The full secret. Present only here. */
+  key: Schema.String,
+  enabled: Schema.Boolean,
+  rate_limit_rpm: Schema.Number,
+  allowed_models: Schema.Array(Schema.String),
+  created_at: Schema.Number,
+  last_used_at: Schema.Number,
+  total_requests: Schema.Number
+})
+export type ApiKeyCreated = typeof ApiKeyCreated.Type
+
+/** A client key as returned by list/detail — the secret itself is masked. */
+export const ApiKeyMasked = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  masked: Schema.String,
+  enabled: Schema.Boolean,
+  rate_limit_rpm: Schema.Number,
+  allowed_models: Schema.Array(Schema.String),
+  created_at: Schema.Number,
+  last_used_at: Schema.Number,
+  total_requests: Schema.Number
+})
+export type ApiKeyMasked = typeof ApiKeyMasked.Type
+
+// --- usage -----------------------------------------------------------------
+
+export const ENDPOINTS = ["chat", "responses", "anthropic"] as const
+export const Endpoint = Schema.Literal(...ENDPOINTS)
+export type Endpoint = typeof Endpoint.Type
+
+/** One completed gateway request. Written once, never updated. */
+export const UsageEntry = Schema.Struct({
+  request_id: Schema.String,
+  ts: Schema.Number,
+  api_key_id: Schema.NullOr(Schema.Number),
+  api_key_name: Schema.NullOr(Schema.String),
+  endpoint: Endpoint,
+  stream: Schema.Boolean,
+  public_model: Schema.String,
+  provider_id: Schema.NullOr(Schema.Number),
+  provider_name: Schema.NullOr(Schema.String),
+  provider_kind: Schema.NullOr(ProviderKind),
+  upstream_model: Schema.NullOr(Schema.String),
+  prompt_tokens: Schema.Number,
+  completion_tokens: Schema.Number,
+  cached_tokens: Schema.Number,
+  reasoning_tokens: Schema.Number,
+  cost: Schema.Number,
+  currency: Schema.String,
+  /** Provider attempts made; 1 means the first candidate worked. */
+  attempts: Schema.Number,
+  status: Schema.Number,
+  error_kind: Schema.NullOr(Schema.String),
+  error_message: Schema.NullOr(Schema.String),
+  latency_ms: Schema.Number,
+  ttft_ms: Schema.Number,
+  client_ip: Schema.NullOr(Schema.String),
+  user_agent: Schema.NullOr(Schema.String)
+})
+export type UsageEntry = typeof UsageEntry.Type
+
+/** Aggregate row for the dashboard tables. */
+export const UsageAggregate = Schema.Struct({
+  key: Schema.String,
+  requests: Schema.Number,
+  errors: Schema.Number,
+  prompt_tokens: Schema.Number,
+  completion_tokens: Schema.Number,
+  cached_tokens: Schema.Number,
+  reasoning_tokens: Schema.Number,
+  cost: Schema.Number,
+  avg_latency_ms: Schema.Number,
+  avg_ttft_ms: Schema.Number
+})
+export type UsageAggregate = typeof UsageAggregate.Type
+
+/**
+ * Rollup shown at the top of the dashboard.
+ *
+ * `cache_rate` is `cached_tokens / prompt_tokens` over the window: the share of
+ * prompt tokens the providers served from their own prompt caches. Providers that
+ * report nothing contribute 0 to both sides, so the rate is never inflated by
+ * missing data.
+ */
+export const UsageSummary = Schema.Struct({
+  window_ms: Schema.Number,
+  requests: Schema.Number,
+  errors: Schema.Number,
+  prompt_tokens: Schema.Number,
+  completion_tokens: Schema.Number,
+  cached_tokens: Schema.Number,
+  reasoning_tokens: Schema.Number,
+  cost: Schema.Number,
+  cache_rate: Schema.NullOr(Schema.Number),
+  avg_latency_ms: Schema.NullOr(Schema.Number),
+  avg_ttft_ms: Schema.NullOr(Schema.Number),
+  by_model: Schema.Array(UsageAggregate),
+  by_provider: Schema.Array(UsageAggregate),
+  by_key: Schema.Array(UsageAggregate)
+})
+export type UsageSummary = typeof UsageSummary.Type
+
+/** Bucketed time series point for the dashboard charts. */
+export const UsagePoint = Schema.Struct({
+  ts: Schema.Number,
+  requests: Schema.Number,
+  errors: Schema.Number,
+  prompt_tokens: Schema.Number,
+  completion_tokens: Schema.Number,
+  cached_tokens: Schema.Number,
+  cost: Schema.Number
+})
+export type UsagePoint = typeof UsagePoint.Type

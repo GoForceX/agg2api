@@ -1,0 +1,321 @@
+/**
+ * Model discovery, route synchronisation and credit refresh.
+ *
+ * Discovery is what keeps the gateway's model list honest: upstreams add and
+ * retire models constantly, and a gateway whose catalogue is typed in by hand goes
+ * stale within weeks. Every provider is queried through its adapter's `listModels`,
+ * which already tolerates providers that cannot enumerate.
+ */
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as SqlClient from "@effect/sql/SqlClient"
+import * as HttpClient from "@effect/platform/HttpClient"
+import type { Credits, DiscoveredModel, Provider } from "../domain.ts"
+import { createProvider, listModels, listModelsForProvider, listProviders, replaceProviderModels } from "../db/providers.ts"
+import { getCredits, saveCredits } from "../db/credits.ts"
+import { createRoute, listRoutes, resolveTargets } from "../db/routes.ts"
+import { adapterFor } from "./executor.ts"
+import { fetchCredits } from "../upstream/workbuddy.ts"
+
+export interface DiscoveryResult {
+  readonly provider_id: number
+  readonly models: ReadonlyArray<DiscoveredModel>
+  readonly created: ReadonlyArray<string>
+  readonly removed: ReadonlyArray<string>
+  readonly error: string | null
+}
+
+/**
+ * Apply a provider's rename map and allow/deny globs to one discovered id.
+ *
+ * Order matters: an explicit rename wins outright, then the denylist, then the
+ * allowlist. Filtering after renaming means an operator can allow a public name
+ * that the upstream spells differently — which is the actual use case for
+ * renaming, not cosmetic aliasing.
+ */
+const matchGlob = (pattern: string, value: string): boolean => {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")
+  return new RegExp(`^${escaped}$`).test(value)
+}
+
+const publicIdFor = (provider: Provider, upstreamId: string): string => {
+  const renamed = provider.model_rename[upstreamId]
+  if (renamed !== undefined && renamed !== "") return renamed
+  return upstreamId
+}
+
+const isAllowed = (provider: Provider, publicId: string): boolean => {
+  if (provider.model_deny.some((pattern) => matchGlob(pattern, publicId))) return false
+  if (provider.model_allow.length === 0) return true
+  return provider.model_allow.some((pattern) => matchGlob(pattern, publicId))
+}
+
+/**
+ * Discover one provider's models and store them.
+ *
+ * A discovery failure is reported rather than thrown: one unreachable provider must
+ * not stop the others from refreshing, and the admin UI shows the error next to
+ * that provider.
+ */
+export const discoverProvider = (
+  provider: Provider
+): Effect.Effect<DiscoveryResult, never, HttpClient.HttpClient | SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const adapter = adapterFor(provider.kind)
+
+    const listed = yield* adapter.listModels(provider).pipe(
+      Effect.map((models) => ({ ok: true as const, models })),
+      Effect.catchAll((error) => Effect.succeed({ ok: false as const, error }))
+    )
+
+    if (!listed.ok) {
+      const existing = yield* listModelsForProvider(sql, provider.id).pipe(Effect.orDie)
+      return {
+        provider_id: provider.id,
+        models: existing,
+        created: [],
+        removed: [],
+        error: `${listed.error.kind}: ${listed.error.message}`
+      }
+    }
+
+    const ts = Date.now()
+    const mapped: DiscoveredModel[] = []
+    for (const model of listed.models) {
+      const publicId = publicIdFor(provider, model.id)
+      if (!isAllowed(provider, publicId)) continue
+      mapped.push({
+        provider_id: provider.id,
+        upstream_id: model.id,
+        public_id: publicId,
+        context_length: model.context_length,
+        max_output_tokens: model.max_output_tokens,
+        supports_images: model.supports_images,
+        owned_by: model.owned_by,
+        last_seen: ts
+      })
+    }
+
+    const changed = yield* replaceProviderModels(sql, provider.id, mapped).pipe(Effect.orDie)
+    return {
+      provider_id: provider.id,
+      models: mapped,
+      created: changed.added,
+      removed: changed.removed,
+      error: null
+    }
+  })
+
+/** Discover every enabled provider, concurrently. */
+export const discoverAll = (): Effect.Effect<
+  ReadonlyArray<DiscoveryResult>,
+  never,
+  HttpClient.HttpClient | SqlClient.SqlClient
+> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const providers = yield* listProviders(sql).pipe(Effect.orDie)
+    const enabled = providers.filter((provider) => provider.enabled)
+    return yield* Effect.forEach(enabled, (provider) => discoverProvider(provider), {
+      concurrency: 4
+    })
+  })
+
+export interface DiscoveredCredits {
+  readonly provider_id: number
+  readonly credits: Credits | null
+  readonly error: string | null
+}
+
+/**
+ * Refresh and store a workbuddy2api provider's credit snapshot.
+ *
+ * A failed refresh still writes a snapshot, with `error` set and the account list
+ * empty: the dashboard then shows "last known at T, error: …" instead of silently
+ * displaying stale numbers as if they were current.
+ */
+export const refreshCredits = (
+  provider: Provider
+): Effect.Effect<DiscoveredCredits, never, HttpClient.HttpClient | SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+
+    if (provider.kind !== "workbuddy2api") {
+      const existing = yield* getCredits(sql, provider.id).pipe(Effect.orDie)
+      return { provider_id: provider.id, credits: Option.getOrNull(existing), error: null }
+    }
+
+    const result = yield* fetchCredits(provider).pipe(
+      Effect.map((credits) => ({ ok: true as const, credits })),
+      Effect.catchAll((error) =>
+        Effect.succeed({ ok: false as const, message: `${error.kind}: ${error.message}` })
+      )
+    )
+
+    if (!result.ok) {
+      const previous = yield* getCredits(sql, provider.id).pipe(Effect.orDie)
+      const failed: Credits = {
+        provider_id: provider.id,
+        total: Option.match(previous, { onNone: () => 0, onSome: (value) => value.total }),
+        healthy: Option.match(previous, { onNone: () => 0, onSome: (value) => value.healthy }),
+        accounts: Option.match(previous, { onNone: () => [], onSome: (value) => value.accounts }),
+        fetched_at: Date.now(),
+        error: result.message
+      }
+      yield* saveCredits(sql, provider.id, failed).pipe(Effect.orDie)
+      return { provider_id: provider.id, credits: failed, error: result.message }
+    }
+
+    yield* saveCredits(sql, provider.id, {
+      total: result.credits.total,
+      healthy: result.credits.healthy,
+      accounts: result.credits.accounts,
+      fetched_at: result.credits.fetched_at,
+      error: null
+    }).pipe(Effect.orDie)
+    return { provider_id: provider.id, credits: result.credits, error: null }
+  })
+
+export interface RouteSyncResult {
+  readonly created: ReadonlyArray<string>
+  readonly updated: ReadonlyArray<string>
+  readonly removed: ReadonlyArray<string>
+}
+
+/**
+ * Reconcile auto-generated routes with the discovered catalogue.
+ *
+ * Only routes the gateway itself created are touched, and they are marked by
+ * carrying a single target. A route an operator has curated — several targets,
+ * hand-set priorities — is never rewritten, because silently discarding that
+ * curation is worse than leaving a route slightly stale.
+ *
+ * Public models that no longer exist on any provider are dropped, since a route
+ * pointing at nothing only produces 404s.
+ */
+export const syncRoutes = (): Effect.Effect<
+  RouteSyncResult,
+  never,
+  SqlClient.SqlClient | HttpClient.HttpClient
+> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const providers = yield* listProviders(sql).pipe(Effect.orDie)
+    const existing = yield* listRoutes(sql).pipe(Effect.orDie)
+    const byModel = new Map(existing.map((route) => [route.public_model, route]))
+
+    // Public model → the providers that can serve it, best provider first.
+    const wanted = new Map<string, Array<{ provider_id: number; upstream_model: string }>>()
+    for (const provider of providers) {
+      if (!provider.enabled) continue
+      const models = yield* listModelsForProvider(sql, provider.id).pipe(Effect.orDie)
+      for (const model of models) {
+        const list = wanted.get(model.public_id) ?? []
+        list.push({ provider_id: provider.id, upstream_model: model.upstream_id })
+        wanted.set(model.public_id, list)
+      }
+    }
+
+    const created: string[] = []
+    const updated: string[] = []
+    const removed: string[] = []
+
+    for (const [publicModel, targets] of wanted) {
+      const route = byModel.get(publicModel)
+      const isAutoManaged = route === undefined || route.targets.length <= 1
+
+      if (route === undefined) {
+        yield* createRoute(sql, {
+          public_model: publicModel,
+          // Inherit the gateway strategy: an operator who wants weighted routing
+          // sets it globally or overrides the routes they care about.
+          strategy: null,
+          enabled: true,
+          display_name: null,
+          targets: targets.map((target) => ({
+            provider_id: target.provider_id,
+            upstream_model: target.upstream_model,
+            priority: 100,
+            enabled: true
+          }))
+        }).pipe(Effect.orDie)
+        created.push(publicModel)
+        continue
+      }
+
+      // A curated multi-target route keeps whatever the operator configured.
+      if (!isAutoManaged) continue
+
+      const desired = targets.map((target) => ({
+        provider_id: target.provider_id,
+        upstream_model: target.upstream_model,
+        priority: 100,
+        enabled: true
+      }))
+      const current = route.targets.map((target) => `${target.provider_id}:${target.upstream_model}`).sort()
+      const next = desired.map((target) => `${target.provider_id}:${target.upstream_model}`).sort()
+      if (current.join("|") === next.join("|")) continue
+
+      yield* createRoute(sql, {
+        public_model: publicModel,
+        strategy: route.strategy,
+        enabled: route.enabled,
+        display_name: route.display_name,
+        targets: desired
+      }).pipe(Effect.orDie)
+      updated.push(publicModel)
+    }
+
+    for (const route of existing) {
+      if (wanted.has(route.public_model)) continue
+      // Preserve a route the operator built by hand even if discovery no longer
+      // sees the model; they may be pointing at an upstream we cannot enumerate.
+      if (route.targets.length > 1) continue
+      yield* sql`DELETE FROM routes WHERE public_model = ${route.public_model}`.pipe(Effect.orDie)
+      removed.push(route.public_model)
+    }
+
+    return { created, updated, removed }
+  })
+
+/** Models reachable right now, for `/v1/models`. */
+export const catalogue = (): Effect.Effect<
+  ReadonlyArray<{ public_model: string; display_name: string | null; providers: ReadonlyArray<string> }>,
+  never,
+  SqlClient.SqlClient
+> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const routes = yield* listRoutes(sql).pipe(Effect.orDie)
+    const providers = yield* listProviders(sql).pipe(Effect.orDie)
+    const nameById = new Map(providers.map((provider) => [provider.id, provider.name]))
+
+    const out: Array<{ public_model: string; display_name: string | null; providers: string[] }> = []
+    for (const route of routes) {
+      if (!route.enabled) continue
+      const resolved = yield* resolveTargets(sql, route.public_model).pipe(Effect.orDie)
+      if (resolved.length === 0) continue
+      out.push({
+        public_model: route.public_model,
+        display_name: route.display_name,
+        providers: resolved.map((entry) => nameById.get(entry.target.provider_id) ?? "unknown")
+      })
+    }
+    return out
+  })
+
+/** Metadata for one public model, taken from any provider that reported it. */
+export const modelMetadata = (
+  publicModel: string
+): Effect.Effect<DiscoveredModel | null, never, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const models = yield* listModels(sql).pipe(Effect.orDie)
+    const matches = models.filter((model) => model.public_id === publicModel)
+    // Prefer an entry that carries a context window: providers report differing
+    // amounts of metadata and the richest one is the most useful to a client.
+    return matches.find((model) => model.context_length !== null) ?? matches[0] ?? null
+  })
+
+export { createProvider }
