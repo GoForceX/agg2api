@@ -351,7 +351,11 @@ export const admin = {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* assertProviderInput(req.payload)
-      return yield* fromStorage("creating provider", createProvider(sql, req.payload))
+      const created = yield* fromStorage("creating provider", createProvider(sql, req.payload))
+      // The credential goes in, never back out: a response body ends up in shell
+      // history, CI logs and debugging proxies. `/config` already masks it, and the
+      // dashboard renders that masked hint rather than this field.
+      return { ...created, api_key: maskApiKey(created.api_key) }
     }),
 
   providerUpdate: (
@@ -363,7 +367,7 @@ export const admin = {
       yield* assertProviderInput(req.payload)
       const updated = yield* fromStorage(`updating provider ${id}`, updateProvider(sql, id, req.payload))
       if (Option.isNone(updated)) return yield* Effect.fail(notFound(`provider ${id} does not exist`))
-      return updated.value
+      return { ...updated.value, api_key: maskApiKey(updated.value.api_key) }
     }),
 
   providerDelete: (req: NumberPath): Effect.Effect<void, AdminFailure, SqlClient.SqlClient> =>

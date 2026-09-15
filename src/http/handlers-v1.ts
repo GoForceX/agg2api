@@ -21,7 +21,7 @@ import * as SqlClient from "@effect/sql/SqlClient"
 import * as Stream from "effect/Stream"
 import * as Chat from "../canonical.ts"
 import type { Endpoint, RoutingStrategy } from "../domain.ts"
-import { ProviderError, RoutingError, badRequest, type ClientError } from "../errors.ts"
+import { ProviderError, RoutingError, badRequest, notFound, type ClientError } from "../errors.ts"
 import { AppSettings } from "../gateway/settings.ts"
 import { execute, executeStream } from "../gateway/executor.ts"
 import { catalogue, modelMetadata } from "../gateway/discovery.ts"
@@ -45,16 +45,32 @@ import { anthropicErrors, anthropicMessages } from "./handlers-anthropic.ts"
  * provider's own 429 or 404 is more informative than a generic 502, and it is what
  * an SDK's retry logic keys on.
  */
+/**
+ * OpenAI's `type` for a given status.
+ *
+ * `type` is what an SDK's retry and error-class logic keys on, so it has to agree with
+ * the status: every client error used to be reported as `invalid_request_error`, which
+ * told a caller that exceeded its rate limit that its request was malformed.
+ */
+const errorTypeFor = (status: number): string => {
+  if (status === 401) return "authentication_error"
+  if (status === 403) return "permission_error"
+  if (status === 429) return "rate_limit_error"
+  if (status === 404) return "not_found_error"
+  if (status >= 500) return "api_error"
+  return "invalid_request_error"
+}
+
 const renderError = (error: ClientError | RoutingError | ProviderError) => {
   if (error._tag === "ClientError") {
-    return { status: error.status, code: error.code, type: "invalid_request_error", message: error.message }
+    return { status: error.status, code: error.code, type: errorTypeFor(error.status), message: error.message }
   }
   if (error._tag === "RoutingError") {
     const unavailable = error.reason === "all_unavailable"
     return {
       status: unavailable ? 503 : 404,
       code: error.reason,
-      type: unavailable ? "api_error" : "invalid_request_error",
+      type: errorTypeFor(unavailable ? 503 : 404),
       message: error.message
     }
   }
@@ -123,6 +139,9 @@ export const openEpisode = (
     const request = yield* HttpServerRequest.HttpServerRequest
     const settings = yield* AppSettings
 
+    // A declared length is only a cheap early rejection: a chunked request sends no
+    // Content-Length at all, so trusting the header alone let an arbitrarily large body
+    // be buffered by an unauthenticated caller.
     const contentLength = header(request.headers, "content-length")
     if (contentLength !== null) {
       const length = Number(contentLength)
@@ -130,6 +149,7 @@ export const openEpisode = (
         return yield* Effect.fail(badRequest(`request body exceeds ${settings.max_body_bytes} bytes`))
       }
     }
+    const tooLarge = badRequest(`request body exceeds ${settings.max_body_bytes} bytes`)
 
     const caller = yield* authenticate(header(request.headers, "authorization"))
     const clientIp =
@@ -139,7 +159,33 @@ export const openEpisode = (
 
     yield* rateLimiter(limiterKeyFor(caller, clientIp), yield* rateLimitFor(caller))
 
-    const parsed = yield* request.json.pipe(Effect.orElseSucceed(() => null))
+    // Read the body through the stream so the cap is enforced while consuming, which is
+    // the only way it can apply to a chunked request. `runFoldEffect` stops at the first
+    // chunk that crosses the limit, so nothing beyond it is buffered.
+    interface BodyRead {
+      readonly chunks: ReadonlyArray<Uint8Array>
+      readonly bytes: number
+      readonly over: boolean
+    }
+    const empty: BodyRead = { chunks: [], bytes: 0, over: false }
+    const raw = yield* request.stream.pipe(
+      Stream.runFoldEffect(
+        empty,
+        (state: BodyRead, chunk: Uint8Array): Effect.Effect<BodyRead> => {
+          if (state.over) return Effect.succeed(state)
+          const bytes = state.bytes + chunk.length
+          if (bytes > settings.max_body_bytes) return Effect.succeed({ ...state, bytes, over: true })
+          return Effect.succeed({ chunks: [...state.chunks, chunk], bytes, over: false })
+        }
+      ),
+      Effect.orElseSucceed(() => empty)
+    )
+    if (raw.over) return yield* Effect.fail(tooLarge)
+
+    const text = new TextDecoder().decode(Buffer.concat(raw.chunks.map((chunk) => Buffer.from(chunk))))
+    const parsed: unknown = yield* Effect.try(() => JSON.parse(text) as unknown).pipe(
+      Effect.orElseSucceed(() => null)
+    )
     const body =
       parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
@@ -519,7 +565,10 @@ const modelCard = Effect.gen(function* () {
   if (metadata === null) {
     const live = yield* catalogue()
     if (!live.some((entry) => entry.public_model === id)) {
-      return yield* Effect.fail(badRequest(`no such model: ${id}`, "model"))
+      // 404, not 400: the request is well-formed, the model simply does not exist. The
+      // endpoint declares a 404 for exactly this case, and every OpenAI-shaped client
+      // maps a 400 to "my request was malformed".
+      return yield* Effect.fail(notFound(`no such model: ${id}`, "model"))
     }
   }
 

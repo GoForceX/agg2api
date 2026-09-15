@@ -55,7 +55,7 @@ export function ProvidersView() {
       setNotice(
         result.error !== null
           ? `${result.error}`
-          : COPY.providers.discoverProviderResult(
+          : COPY.providers.discoverResult(
               id,
               result.created.length,
               result.removed.length,
@@ -140,12 +140,12 @@ export function ProvidersView() {
           tone={testResult.result.ok ? "good" : "bad"}
           message={
             testResult.result.ok
-              ? COPY.providers.testResultOk(
+              ? COPY.providers.testOk(
                   testResult.result.model,
                   formatMs(testResult.result.latency_ms),
                   testResult.result.reply
                 )
-              : COPY.providers.testResultFailed(
+              : COPY.providers.testFailed(
                   testResult.result.model,
                   testResult.result.error ?? COPY.state.unknown
                 )
@@ -510,7 +510,7 @@ function ProviderForm({
           <input
             className="input mono"
             value={form.base_url}
-            placeholder="https://api.openai.com"
+            placeholder={COPY.providers.baseUrlPlaceholder}
             spellCheck={false}
             onChange={(event) => patch({ base_url: event.currentTarget.value })}
           />
@@ -528,7 +528,7 @@ function ProviderForm({
             className="input mono"
             type="password"
             value={form.api_key}
-            placeholder={maskedKey ?? "sk-…"}
+            placeholder={maskedKey ?? COPY.providers.apiKeyPlaceholder}
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {
@@ -561,7 +561,7 @@ function ProviderForm({
           <input
             className="input"
             value={form.input_price}
-            placeholder="0"
+            placeholder={COPY.providers.numberPlaceholder}
             onChange={(event) => patch({ input_price: event.currentTarget.value })}
           />
         </Field>
@@ -570,7 +570,7 @@ function ProviderForm({
           <input
             className="input"
             value={form.output_price}
-            placeholder="0"
+            placeholder={COPY.providers.numberPlaceholder}
             onChange={(event) => patch({ output_price: event.currentTarget.value })}
           />
         </Field>
@@ -579,7 +579,7 @@ function ProviderForm({
           <input
             className="input"
             value={form.currency}
-            placeholder="USD"
+            placeholder={COPY.providers.currencyPlaceholder}
             onChange={(event) => patch({ currency: event.currentTarget.value })}
           />
         </Field>

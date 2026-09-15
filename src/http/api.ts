@@ -194,6 +194,7 @@ const v1 = HttpApiGroup.make("v1")
       // can choose between a buffered JSON body and a streaming SSE body.
       .addError(ErrorEnvelope, { status: 400 })
       .addError(ErrorEnvelope, { status: 401 })
+      .addError(ErrorEnvelope, { status: 403 })
       .addError(ErrorEnvelope, { status: 404 })
       .addError(ErrorEnvelope, { status: 429 })
       .addError(ErrorEnvelope, { status: 502 })
@@ -206,6 +207,7 @@ const v1 = HttpApiGroup.make("v1")
       // can choose between a buffered JSON body and a streaming SSE body.
       .addError(ErrorEnvelope, { status: 400 })
       .addError(ErrorEnvelope, { status: 401 })
+      .addError(ErrorEnvelope, { status: 403 })
       .addError(ErrorEnvelope, { status: 404 })
       .addError(ErrorEnvelope, { status: 429 })
       .addError(ErrorEnvelope, { status: 502 })
@@ -218,6 +220,7 @@ const v1 = HttpApiGroup.make("v1")
       // can choose between a buffered JSON body and a streaming SSE body.
       .addError(ErrorEnvelope, { status: 400 })
       .addError(ErrorEnvelope, { status: 401 })
+      .addError(ErrorEnvelope, { status: 403 })
       .addError(ErrorEnvelope, { status: 404 })
       .addError(ErrorEnvelope, { status: 429 })
       .addError(ErrorEnvelope, { status: 502 })
@@ -227,12 +230,16 @@ const v1 = HttpApiGroup.make("v1")
     HttpApiEndpoint.get("models")`/v1/models`
       .addSuccess(Schema.Struct({ object: Schema.Literal("list"), data: Schema.Array(ModelCard) }))
       .addError(ErrorEnvelope, { status: 401 })
+      .addError(ErrorEnvelope, { status: 403 })
+      .addError(ErrorEnvelope, { status: 429 })
   )
   .add(
     HttpApiEndpoint.get("model")`/v1/models/${Schema.String}`
       .addSuccess(ModelCard)
       .addError(ErrorEnvelope, { status: 401 })
+      .addError(ErrorEnvelope, { status: 403 })
       .addError(ErrorEnvelope, { status: 404 })
+      .addError(ErrorEnvelope, { status: 429 })
   )
 
 // ---------------------------------------------------------------------------

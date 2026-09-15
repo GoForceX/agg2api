@@ -155,7 +155,10 @@ beforeAll(async () => {
       AGG2API_DB_PATH: dbPath,
       AGG2API_ADMIN_TOKEN: ADMIN_TOKEN,
       AGG2API_DISCOVERY_INTERVAL_S: "0",
-      AGG2API_LOG_RETENTION_DAYS: "0"
+      AGG2API_LOG_RETENTION_DAYS: "0",
+      // Small enough that the body-cap test can prove the limit is enforced while
+      // reading a chunked stream, without buffering megabytes in a test.
+      AGG2API_MAX_BODY_BYTES: "65536"
     },
     stdout: "ignore",
     stderr: "ignore"
@@ -255,6 +258,119 @@ describe("admin API over HTTP", () => {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` }
     })
     expect(allowed.status).toBe(200)
+  })
+
+  test("reports an error type that matches the status", async () => {
+    // `type` is what an SDK's retry and error-class logic keys on. Every client error
+    // used to be reported as `invalid_request_error`, so a caller that exceeded its rate
+    // limit was told its request was malformed.
+    const disabled = await createProvider({
+      name: "disabled-provider",
+      kind: "openai-chat",
+      base_url: upstream.base,
+      enabled: false
+    })
+
+    const limited = await admin("/admin/api/keys", {
+      method: "POST",
+      body: JSON.stringify({ name: "tight", rate_limit_rpm: 1, allowed_models: ["nothing-matches"] })
+    })
+    const key = ((await limited.json()) as { key: string }).key
+
+    // Rate limit: the second call exceeds 1 rpm.
+    await request("/v1/models", { headers: { authorization: `Bearer ${key}` } })
+    const throttled = await request("/v1/models", { headers: { authorization: `Bearer ${key}` } })
+    expect(throttled.status).toBe(429)
+    expect(((await throttled.json()) as { error: { type: string } }).error.type).toBe("rate_limit_error")
+
+    // A key scoped to some other model: 403, not 400. The allowlist is enforced per
+    // model on a completion, not on the catalogue listing.
+    const scoped = await admin("/admin/api/keys", {
+      method: "POST",
+      body: JSON.stringify({ name: "scoped", allowed_models: ["only-this"] })
+    })
+    const scopedKey = ((await scoped.json()) as { key: string }).key
+    const forbidden = await request("/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${scopedKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "test-model", messages: [{ role: "user", content: "hi" }] })
+    })
+    expect(forbidden.status).toBe(403)
+    expect(((await forbidden.json()) as { error: { type: string } }).error.type).toBe("permission_error")
+
+    void disabled
+  })
+
+  test("returns 404 for an unknown model rather than 400", async () => {
+    // Anonymous, since `require_client_key` is off here: an admin bearer token would be
+    // treated as an unknown client key by the /v1 auth path.
+    const response = await request("/v1/models/does-not-exist")
+    expect(response.status).toBe(404)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("not_found_error")
+  })
+
+  test("never echoes a provider credential in a write response", async () => {
+    // The response body of a write ends up in shell history, CI logs and debugging
+    // proxies, so a credential must go in and never come back out.
+    const secret = "sk-write-secret-1234567890"
+    const created = await admin("/admin/api/providers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "echo", kind: "openai-chat", base_url: upstream.base, api_key: secret })
+    })
+    expect(created.status).toBe(200)
+    expect(await created.text()).not.toContain(secret)
+
+    const config = (await (await admin("/admin/api/config")).json()) as {
+      providers: Array<{ provider: { id: number; api_key: string } }>
+    }
+    const id = config.providers.at(-1)?.provider.id ?? 0
+
+    const updated = await admin(`/admin/api/providers/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ priority: 42 })
+    })
+    expect(updated.status).toBe(200)
+    expect(await updated.text()).not.toContain(secret)
+
+    // The edit form still has something to show, and the stored value is unchanged.
+    const masked = config.providers.at(-1)?.provider.api_key ?? ""
+    expect(masked).not.toBe("")
+    expect(masked).not.toBe(secret)
+  })
+
+  test("caps a chunked request body, which declares no Content-Length", async () => {
+    // `content-length` is only a cheap early rejection. A chunked request omits it
+    // entirely, so trusting the header let an unauthenticated caller have an arbitrarily
+    // large body buffered. The cap is now enforced while reading the stream.
+    // The shared gateway runs with AGG2API_MAX_BODY_BYTES=65536 (see the env above).
+    // The body must be a *stream*: a buffer body still gets a Content-Length, which the
+    // header check would catch and which would leave the streaming path untested.
+    const chunk = new TextEncoder().encode(`{"model":"test-model","messages":[],"pad":"${"x".repeat(8192)}"}`)
+    let sent = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= 256 * 1024) {
+          controller.close()
+          return
+        }
+        controller.enqueue(chunk)
+        sent += chunk.length
+      }
+    })
+
+    const response = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      // Required by fetch whenever the body is a stream.
+      duplex: "half"
+    } as RequestInit & { duplex: "half" })
+
+    expect(response.status).toBe(400)
+    const payload = (await response.json()) as { error?: { message?: string } }
+    expect(payload.error?.message ?? "").toContain("exceeds")
   })
 
   test("decodes a numeric path parameter and updates the row", async () => {

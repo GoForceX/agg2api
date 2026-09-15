@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api, errorMessage } from "../lib/api.ts"
+import { COPY } from "../lib/copy.ts"
 import { formatDateTime, formatInt } from "../lib/format.ts"
 import { useAdminConfig, useRefreshAdmin } from "../lib/queries.ts"
 import type { ProviderDetail, Route, RouteInput, RouteTarget, RoutingStrategy } from "../lib/types.ts"
@@ -9,9 +10,9 @@ import { Badge, Banner, Card, ConfirmButton, ErrorPanel, Field, Loading, Modal, 
 type StrategyChoice = "inherit" | RoutingStrategy
 
 const STRATEGY_LABEL: Record<StrategyChoice, string> = {
-  inherit: "inherit default",
-  priority: "priority",
-  weighted: "weighted"
+  inherit: COPY.routes.inherit,
+  priority: COPY.strategies.priority,
+  weighted: COPY.strategies.weighted
 }
 
 type TargetDraft = {
@@ -111,15 +112,13 @@ export function RoutesView() {
   const sync = useMutation({
     mutationFn: api.syncRoutes,
     onSuccess: async (result) => {
-      setNotice(
-        `Sync: ${result.created.length} created, ${result.updated.length} updated, ${result.removed.length} removed.`
-      )
+      setNotice(COPY.routes.syncResult(result.created.length, result.updated.length, result.removed.length))
       await refresh()
     },
     onError: (error) => setNotice(errorMessage(error))
   })
 
-  if (config.isPending) return <Loading label="Loading routes" />
+  if (config.isPending) return <Loading label={COPY.state.loadingRoutes} />
   if (config.isError) return <ErrorPanel error={config.error} onRetry={() => void config.refetch()} />
 
   const providers = config.data.providers

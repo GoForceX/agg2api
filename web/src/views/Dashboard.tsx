@@ -1,3 +1,4 @@
+import { COPY } from "../lib/copy.ts"
 import { formatCompact, formatCost, formatDuration, formatInt, formatMs, formatPercent } from "../lib/format.ts"
 import { DEFAULT_WINDOW, useOverview, useUsage } from "../lib/queries.ts"
 import type { UsageAggregate } from "../lib/types.ts"
@@ -8,7 +9,7 @@ export function DashboardView() {
   const overview = useOverview()
   const usage = useUsage(DEFAULT_WINDOW.windowMs, DEFAULT_WINDOW.bucketMs)
 
-  if (overview.isPending) return <Loading label="Loading overview" />
+  if (overview.isPending) return <Loading label={COPY.state.loadingOverview} />
   if (overview.isError) return <ErrorPanel error={overview.error} onRetry={() => void overview.refetch()} />
 
   const data = overview.data
@@ -18,31 +19,31 @@ export function DashboardView() {
 
   return (
     <div className="stack">
-      <h1>Dashboard</h1>
+      <h1>{COPY.dashboard.title}</h1>
 
       <div className="stat-grid">
         <Stat
-          label="Providers"
+          label={COPY.dashboard.providers}
           value={`${formatInt(data.providers_enabled)} / ${formatInt(data.providers_total)}`}
-          hint="enabled / total"
+          hint={COPY.dashboard.providersRatio}
         />
         <Stat
-          label="Breakers open"
+          label={COPY.dashboard.breakersOpen}
           value={formatInt(data.providers_open)}
           tone={data.providers_open > 0 ? "bad" : "good"}
-          hint="providers cooling down"
+          hint={COPY.dashboard.breakersHint}
         />
-        <Stat label="Models" value={formatInt(data.models)} hint="discovered and published" />
-        <Stat label="Routes" value={formatInt(data.routes)} hint="public model mappings" />
-        <Stat label="Keys" value={formatInt(data.keys)} hint="client keys" />
+        <Stat label={COPY.dashboard.models} value={formatInt(data.models)} hint={COPY.dashboard.modelsHint} />
+        <Stat label={COPY.dashboard.routes} value={formatInt(data.routes)} hint={COPY.dashboard.routesHint} />
+        <Stat label={COPY.dashboard.keys} value={formatInt(data.keys)} hint={COPY.dashboard.keysHint} />
         <Stat
-          label="Credits"
+          label={COPY.dashboard.credits}
           value={formatCompact(data.credits_total)}
-          hint="workbuddy2api upstreams"
+          hint={COPY.dashboard.creditsHint}
           tone={data.credits_total <= 0 ? "warn" : undefined}
         />
         <Stat
-          label="Session affinity"
+          label={COPY.dashboard.sessions}
           value={
             data.sessions.lookups === 0
               ? "—"
@@ -50,74 +51,76 @@ export function DashboardView() {
           }
           hint={
             data.sessions.tracked === 0
-              ? "no sessions pinned"
-              : `${formatInt(data.sessions.tracked)} pinned · ${formatInt(data.sessions.hits)} reused`
+              ? COPY.dashboard.sessionsHint(data.sessions.tracked)
+              : COPY.dashboard.sessionsReuse(data.sessions.tracked, data.sessions.hits)
           }
         />
-        <Stat label="Uptime" value={formatDuration(data.uptime_s)} hint="since last start" />
+        <Stat label={COPY.dashboard.uptime} value={formatDuration(data.uptime_s)} hint={COPY.dashboard.uptimeHint} />
       </div>
 
       <Card
-        title={`Traffic · last ${DEFAULT_WINDOW.label}`}
-        subtitle="Totals across every provider for the default window"
+        title={COPY.dashboard.trafficTitle(DEFAULT_WINDOW.label)}
+        subtitle={COPY.dashboard.trafficSubtitle}
         actions={
           <button type="button" className="btn btn-small" onClick={() => void usage.refetch()}>
-            Refresh
+            {COPY.action.refresh}
           </button>
         }
         padded
       >
         {usage.isPending ? (
-          <Loading label="Loading usage" />
+          <Loading label={COPY.state.loadingUsage} />
         ) : usage.isError ? (
           <ErrorPanel error={usage.error} onRetry={() => void usage.refetch()} />
         ) : summary === undefined ? (
-          <p className="muted">No usage data.</p>
+          <p className="muted">{COPY.dashboard.noUsage}</p>
         ) : (
           <>
             <div className="stat-grid">
-              <Stat label="Requests" value={formatInt(summary.requests)} />
+              <Stat label={COPY.metric.requests} value={formatInt(summary.requests)} />
               <Stat
-                label="Errors"
+                label={COPY.metric.errors}
                 value={formatInt(summary.errors)}
                 tone={summary.errors > 0 ? "warn" : "good"}
-                hint={errorRate === null ? "no traffic" : `${formatPercent(errorRate)} of requests`}
+                hint={errorRate === null ? COPY.dashboard.noTraffic : COPY.dashboard.errorRateHint(formatPercent(errorRate))}
               />
-              <Stat label="Prompt tokens" value={formatCompact(summary.prompt_tokens)} />
-              <Stat label="Completion tokens" value={formatCompact(summary.completion_tokens)} />
-              <Stat label="Cost" value={formatCost(summary.cost)} hint="reported by providers" />
-              <Stat label="Avg latency" value={formatMs(summary.avg_latency_ms)} />
-              <Stat label="Avg TTFT" value={formatMs(summary.avg_ttft_ms)} hint="time to first token" />
+              <Stat label={COPY.metric.promptTokens} value={formatCompact(summary.prompt_tokens)} />
+              <Stat label={COPY.metric.completionTokens} value={formatCompact(summary.completion_tokens)} />
+              <Stat label={COPY.metric.cost} value={formatCost(summary.cost)} hint={COPY.dashboard.costHint} />
+              <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
+              <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} hint={COPY.dashboard.ttftHint} />
             </div>
 
             <div className="cache-block">
               <div className="cache-head">
-                <span className="stat-label">Prompt cache rate</span>
+                <span className="stat-label">{COPY.metric.cacheRate}</span>
                 <span className="stat-value">{formatPercent(summary.cache_rate)}</span>
               </div>
               <ProgressBar
                 ratio={summary.cache_rate}
-                label={`Prompt cache hit rate ${formatPercent(summary.cache_rate)}`}
+                label={COPY.dashboard.cacheBarLabel(formatPercent(summary.cache_rate))}
               />
               <p className="muted small">
-                {formatCompact(summary.cached_tokens)} of {formatCompact(summary.prompt_tokens)} prompt tokens served from
-                provider cache.
+                {COPY.dashboard.cacheNote(
+                  formatCompact(summary.cached_tokens),
+                  formatCompact(summary.prompt_tokens)
+                )}
               </p>
             </div>
 
-            <h3 className="section-title">Requests over time</h3>
-            <BarChart points={series} label={`Requests per bucket over the last ${DEFAULT_WINDOW.label}`} />
+            <h3 className="section-title">{COPY.dashboard.requestsOverTime}</h3>
+            <BarChart points={series} label={COPY.dashboard.chartLabel(DEFAULT_WINDOW.label)} />
           </>
         )}
       </Card>
 
-      <Card title="By provider" subtitle="Window totals per upstream" padded>
+      <Card title={COPY.dashboard.byProvider} subtitle={COPY.dashboard.byProviderHint} padded>
         {usage.isPending ? (
-          <Loading label="Loading usage" />
+          <Loading label={COPY.state.loadingUsage} />
         ) : summary === undefined ? (
-          <p className="muted">No usage data.</p>
+          <p className="muted">{COPY.dashboard.noUsage}</p>
         ) : (
-          <AggregateTable rows={summary.by_provider} empty="No provider traffic in this window." />
+          <AggregateTable rows={summary.by_provider} empty={COPY.dashboard.noProviderTraffic} />
         )}
       </Card>
     </div>
@@ -131,15 +134,15 @@ export function AggregateTable({ rows, empty }: { rows: UsageAggregate[]; empty:
       <table>
         <thead>
           <tr>
-            <th>Key</th>
-            <th className="num">Requests</th>
-            <th className="num">Errors</th>
-            <th className="num">Prompt</th>
-            <th className="num">Completion</th>
-            <th className="num">Cache rate</th>
-            <th className="num">Cost</th>
-            <th className="num">Avg latency</th>
-            <th className="num">Avg TTFT</th>
+            <th>{COPY.dashboard.aggregateKey}</th>
+            <th className="num">{COPY.column.requests}</th>
+            <th className="num">{COPY.column.errors}</th>
+            <th className="num">{COPY.column.promptTokens}</th>
+            <th className="num">{COPY.column.completionTokens}</th>
+            <th className="num">{COPY.column.cacheRate}</th>
+            <th className="num">{COPY.column.cost}</th>
+            <th className="num">{COPY.column.avgLatency}</th>
+            <th className="num">{COPY.column.avgTtft}</th>
           </tr>
         </thead>
         <tbody>

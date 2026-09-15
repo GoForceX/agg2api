@@ -233,7 +233,8 @@ export const COPY = {
     noProviderTraffic: "该时间窗口内没有上游流量。",
     degraded: "服务未就绪",
     degradedHint: (detail: string) => `每个请求都会失败：${detail}`,
-    /** The stat shows the raw `enabled / total` ratio; this names the two numbers. */
+    /** Legend for the `N / M` stat value, which shows enabled against total. */
+    providersRatio: "已启用 / 总数",
     sessionsReuse: (pinned: number, reused: number) => `已固定 ${pinned} 个会话 · 复用 ${reused} 次`,
     trafficTitle: (window: string) => `请求流量 · 最近 ${window}`,
     trafficSubtitle: "默认窗口内所有上游的合计",
@@ -244,7 +245,9 @@ export const COPY = {
     cacheBarLabel: (rate: string) => `输入缓存命中率 ${rate}`,
     cacheNote: (cached: string, prompt: string) => `${prompt} 个输入 Token 中有 ${cached} 个来自上游缓存。`,
     requestsOverTime: "请求随时间变化",
-    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`
+    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`,
+    noUsage: "暂无用量数据。",
+    aggregateKey: "分组"
   },
 
   providers: {
@@ -262,10 +265,11 @@ export const COPY = {
     headersHint: "每行一个，格式为 名称: 值",
     priceHint: "用于计算费用；留空表示不计费。",
     discovering: "正在拉取模型列表…",
-    discoverResult: (added: number, removed: number) => `新增 ${added} 个模型，移除 ${removed} 个`,
+    discoverResult: (id: number, added: number, removed: number, total: number) =>
+      `上游 ${id}：新增 ${added} 个模型，移除 ${removed} 个，共 ${total} 个`,
     discoverFailed: "拉取失败",
-    testOk: (latency: string) => `连通正常，耗时 ${latency}`,
-    testFailed: (message: string) => `连接失败：${message}`,
+    testOk: (model: string, latency: string, reply: string) => `连通正常 · ${model} · ${latency} · “${reply}”`,
+    testFailed: (model: string, message: string) => `连接失败 · ${model}：${message}`,
     deleteConfirm: "删除该上游会同时移除它在所有路由中的引用。确定删除吗？",
     breaker: "熔断",
     lastError: "最近错误",
@@ -303,12 +307,7 @@ export const COPY = {
     discoverAllOk: (total: number) => `已在 ${total} 个上游上完成拉取。`,
     discoverAllFailed: (total: number, failed: number, detail: string) =>
       `${total} 个上游中有 ${failed} 个拉取失败：${detail}`,
-    discoverProviderResult: (id: number, added: number, removed: number, total: number) =>
-      `上游 ${id}：新增 ${added} 个模型，移除 ${removed} 个，共 ${total} 个`,
     creditsFailed: (message: string) => `余额获取失败：${message}`,
-    testResultOk: (model: string, latency: string, reply: string) =>
-      `连通正常 · ${model} · ${latency} · “${reply}”`,
-    testResultFailed: (model: string, message: string) => `连接失败 · ${model}：${message}`,
     kindHint: "上游协议类型",
     apiKeyNewHint: "作为上游凭据发送；新建时必须填写。",
     apiKeyRequired: "新建上游必须填写 API 密钥",
@@ -323,6 +322,10 @@ export const COPY = {
     headerNamePlaceholder: "请求头名称",
     headerValuePlaceholder: "值",
     namePlaceholder: "openai-main",
+    baseUrlPlaceholder: "https://api.openai.com",
+    apiKeyPlaceholder: "sk-…",
+    numberPlaceholder: "0",
+    currencyPlaceholder: "USD",
     modelAllowPlaceholder: "gpt-*\no1-*",
     modelDenyPlaceholder: "*-preview\n*-audio-*",
     priceNote: (currency: string) => `价格按每百万 Token 计；用量费用以 ${currency} 结算。`
@@ -333,7 +336,8 @@ export const COPY = {
     subtitle: "对外模型名到上游模型的映射",
     add: "新建路由",
     edit: "编辑路由",
-    empty: "还没有路由。拉取模型并同步之后会自动生成。",
+    editTitle: (model: string) => `编辑路由：${model}`,
+    empty: "还没有路由。可以同步模型发现自动生成，也可以手动新建。",
     publicModelHint: "客户端请求时使用的模型名。",
     targetsHint: "同一策略下的多个上游会按优先级或权重选择。",
     upstreamModelHint: "留空表示与对外模型名相同。",
@@ -360,7 +364,7 @@ export const COPY = {
     revealTitle: "立即复制新密钥",
     clipboardUnavailable: "无法访问剪贴板——请选中输入框手动复制。",
     countTitle: (count: number) => `${count} 个密钥`,
-    rpm: "RPM",
+    rpm: "限速",
     allModels: "全部模型",
     unlimited: "不限速",
     createdAt: (time: string) => `创建于 ${time}`,
@@ -395,10 +399,10 @@ export const COPY = {
     empty: "该时间窗口内没有用量数据。",
     byKey: "按密钥统计",
     breakdown: "分组统计",
-    totalsLast: (window: string) => `最近 ${window} 合计`,
-    bucketEvery: (bucket: string) => `每 ${bucket} 聚合一个数据点`,
-    requestsOverTime: "请求趋势",
-    chartLabel: (window: string) => `最近 ${window} 内每个统计区间的请求数`,
+    totalsLast: (window: string) => `最近 ${window}合计`,
+    bucketEvery: (bucket: string) => `每 ${bucket}聚合一个数据点`,
+    requestsOverTime: "请求随时间变化",
+    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`,
     reasoningTokens: "推理 Token",
     requestId: "请求 ID",
     ttft: "首字延迟",
