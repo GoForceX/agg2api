@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import type { ChangeEvent, ReactNode } from "react"
+import { COPY } from "../lib/copy.ts"
 import { errorMessage } from "../lib/api.ts"
 
 /** A single editable key/value row; duplicate and empty keys stay visible until submit. */
@@ -31,7 +32,7 @@ export function Modal({
       <div className={wide ? "modal modal-wide" : "modal"} role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-head">
           <h2>{title}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label={COPY.action.close} onClick={onClose}>
             ✕
           </button>
         </header>

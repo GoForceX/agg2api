@@ -2,6 +2,7 @@
  * Stacked request/error bars over the usage series. Plain SVG and CSS grid — the
  * bundle ships no chart library and makes no network request at runtime.
  */
+import { COPY } from "../lib/copy.ts"
 import { formatClock, formatInt } from "../lib/format.ts"
 import type { UsagePoint } from "../lib/types.ts"
 
@@ -11,7 +12,7 @@ export function BarChart({ points, label }: { points: UsagePoint[]; label: strin
   const peak = points.reduce((max, point) => Math.max(max, point.requests), 0)
 
   if (points.length === 0) {
-    return <p className="muted padded">No requests in this window.</p>
+    return <p className="muted padded">{COPY.chart.noRequests}</p>
   }
 
   const axis = axisTicks(points)
@@ -32,7 +33,7 @@ export function BarChart({ points, label }: { points: UsagePoint[]; label: strin
               <li key={point.ts} className="chart-bar">
                 <span
                   className="chart-tooltip"
-                  title={`${formatClock(point.ts)} · ${formatInt(point.requests)} requests · ${formatInt(point.errors)} errors`}
+                  title={COPY.chart.tooltip(formatClock(point.ts), formatInt(point.requests), formatInt(point.errors))}
                 />
                 <span className="chart-track">
                   <span className="chart-fill" style={{ height: `${(total * 100).toFixed(2)}%` }}>
@@ -50,8 +51,8 @@ export function BarChart({ points, label }: { points: UsagePoint[]; label: strin
         ))}
       </div>
       <figcaption className="chart-legend muted small">
-        <span className="legend-swatch legend-requests" /> requests
-        <span className="legend-swatch legend-errors" /> errors
+        <span className="legend-swatch legend-requests" /> {COPY.chart.requests}
+        <span className="legend-swatch legend-errors" /> {COPY.chart.errors}
       </figcaption>
     </figure>
   )

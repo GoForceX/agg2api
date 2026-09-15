@@ -15,7 +15,9 @@
     "build:web": "cd web && bun install && bun run build",
     "affinity": "bun run scripts/affinity.ts",
     "tutorial": "bun run scripts/tutorial-check.ts",
-    "failover": "bun run scripts/failover.ts"
+    "failover": "bun run scripts/failover.ts",
+    "breaker-share": "bun run scripts/breaker-share.ts",
+    "route-strategy": "bun run scripts/route-strategy.ts"
   },
   "dependencies": {
     "@effect/experimental": "0.61.1",

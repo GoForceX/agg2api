@@ -52,22 +52,30 @@ const toUpstreamModel = (entry: Record<string, unknown>): UpstreamModel | null =
 /**
  * List the provider's models.
  *
- * A body that is not the expected shape yields an empty array rather than a
- * failure: a provider answering something else at this path simply has nothing to
- * enumerate, and failing here would stall discovery for every other provider.
- * Transport and HTTP failures still surface as `ProviderError`.
+ * A body that is not `{data: [...]}` is reported as not enumerated rather than as an
+ * empty catalogue, because the caller replaces stored models with the result and an
+ * unreadable response must not wipe them. Transport and HTTP failures still surface as
+ * `ProviderError`.
  */
 const listModels = (
   provider: Provider
-): Effect.Effect<ReadonlyArray<UpstreamModel>, ProviderError, HttpClient.HttpClient> =>
+): Effect.Effect<
+  { readonly models: ReadonlyArray<UpstreamModel>; readonly enumerated: boolean },
+  ProviderError,
+  HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
     const response = yield* execute(provider, getRequest(provider, MODELS_PATH))
     const body = yield* response.text.pipe(Effect.mapError((cause) => transportFailure(provider, cause)))
     const json = yield* decodeJson(provider, body).pipe(Effect.orElseSucceed((): unknown => null))
-    if (!isRecord(json)) return []
-    return asRecordArray(json.data)
-      .map(toUpstreamModel)
-      .filter((model): model is UpstreamModel => model !== null)
+    const enumerated = isRecord(json) && Array.isArray(json.data)
+    if (!enumerated) return { models: [], enumerated: false }
+    return {
+      models: asRecordArray(json.data)
+        .map(toUpstreamModel)
+        .filter((model): model is UpstreamModel => model !== null),
+      enumerated: true
+    }
   })
 
 /** Parse one SSE payload, keeping malformed frames out of the conversion. */

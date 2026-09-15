@@ -329,15 +329,29 @@ describe("listModels", () => {
     }
   })
 
-  test("returns [] when the payload has no data array", async () => {
-    const mock = serve(() => json({ nope: 1 }))
-    const broken = serve(() => new Response("<html>gateway</html>", { status: 200 }))
+  test("reports an unreadable payload as not enumerated, not as an empty catalogue", async () => {
+    const envelope = serve(() => json({ error: { message: "unauthorized" } }))
+    const html = serve(() => new Response("<html>gateway</html>", { status: 200 }))
+    const empty = serve(() => json({ data: [] }))
     try {
-      expect(await run(openaiChatAdapter.listModels(provider(mock.port)))).toEqual([])
-      // A body that is not JSON at all is still "nothing to enumerate", not a fault.
-      expect(await run(openaiChatAdapter.listModels(provider(broken.port)))).toEqual([])
+      // A proxy error envelope under HTTP 200 must not read as "this provider has no
+      // models": discovery replaces the stored catalogue with the result, so that would
+      // delete every model and route.
+      expect(await run(openaiChatAdapter.listModels(provider(envelope.port)))).toEqual({
+        models: [],
+        enumerated: false
+      })
+      expect(await run(openaiChatAdapter.listModels(provider(html.port)))).toEqual({
+        models: [],
+        enumerated: false
+      })
+      // A genuine empty catalogue is authoritative.
+      expect(await run(openaiChatAdapter.listModels(provider(empty.port)))).toEqual({
+        models: [],
+        enumerated: true
+      })
     } finally {
-      await Promise.all([mock.stop(), broken.stop()])
+      await Promise.all([envelope.stop(), html.stop(), empty.stop()])
     }
   })
 
@@ -357,8 +371,11 @@ describe("listModels", () => {
       })
     )
     try {
-      const models = await run(workbuddyAdapter.listModels(provider(mock.port, { kind: "workbuddy2api" })))
+      const { models, enumerated } = await run(
+        workbuddyAdapter.listModels(provider(mock.port, { kind: "workbuddy2api" }))
+      )
 
+      expect(enumerated).toBe(true)
       expect(models).toHaveLength(1)
       expect(models[0]?.id).toBe("m1")
       expect(models[0]?.context_length).toBe(128_000)

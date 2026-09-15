@@ -462,6 +462,8 @@ bun run smoke        # end-to-end against mock upstreams (31 checks)
 bun run affinity     # proves cache-affinity routing, incl. failover (9 checks)
 bun run failover     # shows which provider serves the turn after a failover
 bun run tutorial     # executes every deployment step against a mock upstream
+bun run breaker-share  # a client's bad request must not 503 the provider for others
+bun run route-strategy # a route's own strategy must reach the router
 bun run demo         # seeded instance on :8799 for poking at the UI
 bun run build        # single-file binary → dist/agg2api
 

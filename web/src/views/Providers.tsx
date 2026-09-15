@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api, errorMessage } from "../lib/api.ts"
+import { COPY } from "../lib/copy.ts"
 import { breakerLabel, formatCompact, formatDateTime, formatInt, formatMs } from "../lib/format.ts"
 import {
   EMPTY_PROVIDER,

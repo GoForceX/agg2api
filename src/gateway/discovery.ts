@@ -80,9 +80,24 @@ export const discoverProvider = (
       }
     }
 
+    // An unreadable listing is not an empty catalogue. Replacing the stored models with
+    // nothing would delete them and, through the route sync that follows, delete every
+    // route built from them — so a transient proxy fault would become a persistent 404
+    // outage. The previous catalogue is kept and the condition is reported instead.
+    if (!listed.models.enumerated) {
+      const existing = yield* listModelsForProvider(sql, provider.id).pipe(Effect.orDie)
+      return {
+        provider_id: provider.id,
+        models: existing,
+        created: [],
+        removed: [],
+        error: "upstream returned no readable model list; keeping the last known catalogue"
+      }
+    }
+
     const ts = Date.now()
     const mapped: DiscoveredModel[] = []
-    for (const model of listed.models) {
+    for (const model of listed.models.models) {
       const publicId = publicIdFor(provider, model.id)
       if (!isAllowed(provider, publicId)) continue
       mapped.push({
@@ -295,11 +310,11 @@ export const catalogue = (): Effect.Effect<
     for (const route of routes) {
       if (!route.enabled) continue
       const resolved = yield* resolveTargets(sql, route.public_model).pipe(Effect.orDie)
-      if (resolved.length === 0) continue
+      if (resolved.targets.length === 0) continue
       out.push({
         public_model: route.public_model,
         display_name: route.display_name,
-        providers: resolved.map((entry) => nameById.get(entry.target.provider_id) ?? "unknown")
+        providers: resolved.targets.map((entry) => nameById.get(entry.target.provider_id) ?? "unknown")
       })
     }
     return out

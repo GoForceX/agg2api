@@ -126,7 +126,7 @@ const plan = (
     const sql = yield* SqlClient.SqlClient
     const resolved = yield* resolveTargets(sql, ctx.public_model).pipe(Effect.orDie)
 
-    if (resolved.length === 0) {
+    if (resolved.targets.length === 0) {
       return yield* Effect.fail(
         new RoutingError({
           reason: "unknown_model",
@@ -140,7 +140,7 @@ const plan = (
     // ordering, so the weights of the remaining candidates are unaffected.
     const usable: Candidate[] = []
     let skipped = 0
-    for (const entry of resolved) {
+    for (const entry of resolved.targets) {
       if (settings.breaker_failure_threshold <= 0) {
         usable.push({ target: { provider: entry.provider, upstream_model: entry.target.upstream_model }, priority: entry.target.priority })
         continue
@@ -166,7 +166,9 @@ const plan = (
       )
     }
 
-    const ordered = orderCandidates(usable, strategy, Math.random)
+    // A route's own strategy wins over the gateway default, so per-model routing is
+    // honoured rather than silently ignored.
+    const ordered = orderCandidates(usable, resolved.strategy ?? strategy, Math.random)
 
     // Cache affinity: try the provider that served this session last, first. This is
     // only a preference — `preferPinned` is a stable reorder, so an unavailable or
@@ -272,17 +274,13 @@ const attemptWithRetries = <A>(
 
       // A malformed request is malformed at every provider, so retrying is pure
       // waste. Surfaced immediately instead of after exhausting the candidates.
+      //
+      // Deliberately not recorded as a provider failure: the request was rejected
+      // because the *caller* sent it wrong, so the provider answered correctly. Writing
+      // it to the breaker would let one caller's bad body remove a healthy provider for
+      // every other caller — and /v1 admits anonymous callers by default, so it could be
+      // renewed indefinitely. The attempt still reaches the usage log via `attempts`.
       if (failure.kind === "invalid_request") {
-        yield* recordFailure(
-          sql,
-          target.provider.id,
-          failure.message,
-          breakerDeadline(
-            (yield* getProviderStatus(sql, target.provider.id).pipe(Effect.orDie)).consecutive_failures,
-            limits.breaker_cooldown_base_ms,
-            limits.breaker_cooldown_max_ms
-          )
-        ).pipe(Effect.orDie)
         return { ok: false, error: failure, attempts }
       }
 

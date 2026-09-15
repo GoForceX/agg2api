@@ -189,11 +189,20 @@ export const deleteRoute = (
 export const resolveTargets = (
   sql: SqlClient.SqlClient,
   publicModel: string
-): Effect.Effect<ReadonlyArray<{ target: RouteTarget; provider: Provider }>, SqlError> =>
+): Effect.Effect<
+  { readonly targets: ReadonlyArray<{ target: RouteTarget; provider: Provider }>; readonly strategy: RoutingStrategy | null },
+  SqlError
+> =>
   Effect.gen(function* () {
-    const route = yield* sql<{ enabled: number }>`SELECT enabled FROM routes WHERE public_model = ${publicModel}`
+    const route = yield* sql<{ enabled: number; strategy: string | null }>`
+      SELECT enabled, strategy FROM routes WHERE public_model = ${publicModel}
+    `
     const routeRow = route[0]
-    if (routeRow === undefined || !asBool(routeRow.enabled)) return []
+    if (routeRow === undefined || !asBool(routeRow.enabled)) return { targets: [], strategy: null }
+    // The route's own strategy, or null to fall back to the gateway default. Reading it
+    // here is what makes the per-route setting take effect: it was stored, surfaced in
+    // the UI and documented, but never consulted, so every route routed with the default.
+    const strategy = isStrategy(routeRow.strategy) ? routeRow.strategy : null
 
     const rows = yield* sql<
       TargetRow & { provider_enabled: number; provider_priority: number }
@@ -222,5 +231,5 @@ export const resolveTargets = (
         provider
       })
     }
-    return out
+    return { targets: out, strategy }
   })

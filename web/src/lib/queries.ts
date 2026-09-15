@@ -1,4 +1,5 @@
 /** Shared query keys, fetch hooks, and the invalidation helper mutations use. */
+import { COPY } from "./copy.ts"
 import { useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ApiError, api } from "./api.ts"
@@ -13,10 +14,10 @@ export const queryKeys = {
 
 /** Time windows offered by the usage views, with a bucket that yields ~50–60 chart points. */
 export const WINDOWS = [
-  { id: "1h", label: "1 hour", windowMs: 3_600_000, bucketMs: 60_000 },
-  { id: "24h", label: "24 hours", windowMs: 86_400_000, bucketMs: 1_800_000 },
-  { id: "7d", label: "7 days", windowMs: 604_800_000, bucketMs: 10_800_000 },
-  { id: "30d", label: "30 days", windowMs: 2_592_000_000, bucketMs: 43_200_000 }
+  { id: "1h", label: COPY.windows["1h"], windowMs: 3_600_000, bucketMs: 60_000 },
+  { id: "24h", label: COPY.windows["24h"], windowMs: 86_400_000, bucketMs: 1_800_000 },
+  { id: "7d", label: COPY.windows["7d"], windowMs: 604_800_000, bucketMs: 10_800_000 },
+  { id: "30d", label: COPY.windows["30d"], windowMs: 2_592_000_000, bucketMs: 43_200_000 }
 ] as const
 
 export const DEFAULT_WINDOW = WINDOWS[1]

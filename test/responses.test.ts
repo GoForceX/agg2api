@@ -597,7 +597,7 @@ describe("responsesAdapter", () => {
     }
   })
 
-  test("listModels enumerates the provider and yields [] on an unusable body", async () => {
+  test("listModels enumerates the provider and flags an unusable body", async () => {
     const seen: Array<Record<string, string>> = []
     const mock = serve((req) => {
       seen.push(Object.fromEntries(req.headers.entries()))
@@ -608,13 +608,18 @@ describe("responsesAdapter", () => {
     const broken = serve(() => new Response("<html>nope</html>"))
 
     try {
-      const models = await run(responsesAdapter.listModels(provider(mock.port)))
+      const listed = await run(responsesAdapter.listModels(provider(mock.port)))
 
       expect(seen[0]?.authorization).toBe("Bearer sk-test")
-      expect(models.map((model) => model.id)).toEqual(["gpt-x"])
-      expect(models[0]?.owned_by).toBe("openai")
-      // A body that is not the expected shape means "nothing to enumerate".
-      expect(await run(responsesAdapter.listModels(provider(broken.port)))).toEqual([])
+      expect(listed.enumerated).toBe(true)
+      expect(listed.models.map((model) => model.id)).toEqual(["gpt-x"])
+      expect(listed.models[0]?.owned_by).toBe("openai")
+      // A body that is not the expected shape is reported as unreadable rather than as
+      // an empty catalogue, so discovery keeps the models it already has.
+      expect(await run(responsesAdapter.listModels(provider(broken.port)))).toEqual({
+        models: [],
+        enumerated: false
+      })
     } finally {
       await Promise.all([mock.stop(), broken.stop()])
     }

@@ -107,6 +107,15 @@ export interface Adapter {
    *
    * Adapters that cannot enumerate models return an empty array rather than
    * failing, so one unsupported provider never stalls discovery for the rest.
+   *
+   * `enumerated` distinguishes "the provider advertises no models" from "the response
+   * could not be read as a catalogue" — a proxy error envelope under HTTP 200, an empty
+   * object, or HTML. Both produce zero models, but only the first is authoritative:
+   * discovery replaces the stored catalogue with whatever it receives, so treating an
+   * unreadable response as an empty list would delete every model and every route built
+   * from it, turning a transient upstream fault into a persistent 404 outage.
    */
-  readonly listModels: (provider: Provider) => Effect.Effect<ReadonlyArray<UpstreamModel>, ProviderError, HttpClient.HttpClient>
+  readonly listModels: (
+    provider: Provider
+  ) => Effect.Effect<{ readonly models: ReadonlyArray<UpstreamModel>; readonly enumerated: boolean }, ProviderError, HttpClient.HttpClient>
 }

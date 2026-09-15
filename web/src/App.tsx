@@ -9,6 +9,7 @@ import {
   createRouter
 } from "@tanstack/react-router"
 import { TokenGate } from "./components/TokenPrompt.tsx"
+import { COPY } from "./lib/copy.ts"
 import { openTokenPrompt } from "./lib/api.ts"
 import { WINDOWS } from "./lib/queries.ts"
 import { DashboardView } from "./views/Dashboard.tsx"
@@ -29,11 +30,11 @@ const queryClient = new QueryClient({
 })
 
 const NAV = [
-  { to: "/", label: "Dashboard" },
-  { to: "/providers", label: "Providers" },
-  { to: "/routes", label: "Routes" },
-  { to: "/keys", label: "API keys" },
-  { to: "/usage", label: "Usage" }
+  { to: "/", label: COPY.nav.dashboard },
+  { to: "/providers", label: COPY.nav.providers },
+  { to: "/routes", label: COPY.nav.routes },
+  { to: "/keys", label: COPY.nav.keys },
+  { to: "/usage", label: COPY.nav.usage }
 ] as const
 
 function Shell() {
@@ -43,9 +44,9 @@ function Shell() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">agg2api</span>
-          <span className="muted small">admin</span>
+          <span className="muted small">{COPY.brand.admin}</span>
         </div>
-        <nav className="nav" aria-label="Sections">
+        <nav className="nav" aria-label={COPY.nav.sections}>
           {NAV.map((item) => (
             <Link
               key={item.to}
@@ -59,16 +60,16 @@ function Shell() {
           ))}
         </nav>
         <button type="button" className="btn btn-small" onClick={openTokenPrompt}>
-          Token
+          {COPY.nav.token}
         </button>
       </header>
       <main className="content">
         <Outlet />
       </main>
       <footer className="footer muted small">
-        <span>Default window: {WINDOWS[1].label}</span>
+        <span>{COPY.footer.defaultWindow(WINDOWS[1].label)}</span>
         <span>·</span>
-        <span>Admin API under /admin/api</span>
+        <span>{COPY.footer.apiPath}</span>
       </footer>
     </div>
   )

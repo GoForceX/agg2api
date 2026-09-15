@@ -155,8 +155,11 @@ describe("routes", () => {
         const resolved = yield* resolveTargets(sql, "shared")
         // Priority wins over provider priority, the disabled target and the
         // disabled provider are both filtered, and the provider row is joined in.
-        expect(resolved.map((r) => r.target.upstream_model)).toEqual(["high-1", "low-1"])
-        expect(resolved[0]?.provider.name).toBe("high")
+        expect(resolved.targets.map((r) => r.target.upstream_model)).toEqual(["high-1", "low-1"])
+        expect(resolved.targets[0]?.provider.name).toBe("high")
+        // The route's own strategy is returned so the router can honour it; without
+        // this the column is stored and shown but never reaches routing.
+        expect(resolved.strategy).toBe("priority")
 
         const route = Option.getOrThrow(yield* getRoute(sql, "shared"))
         expect(route.strategy).toBe("priority")
@@ -164,7 +167,7 @@ describe("routes", () => {
 
         // Disabling the route itself removes every candidate.
         yield* updateRoute(sql, "shared", { enabled: false })
-        expect(yield* resolveTargets(sql, "shared")).toEqual([])
+        expect(yield* resolveTargets(sql, "shared")).toEqual({ targets: [], strategy: null })
 
         yield* deleteRoute(sql, "shared")
         expect((yield* listRoutes(sql)).length).toBe(0)

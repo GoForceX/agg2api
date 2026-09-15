@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api, errorMessage } from "../lib/api.ts"
+import { COPY } from "../lib/copy.ts"
 import { formatAgo, formatDateTime, formatInt } from "../lib/format.ts"
 import { fromLines, toLines } from "../lib/forms.ts"
 import { useAdminConfig, useRefreshAdmin } from "../lib/queries.ts"
@@ -38,7 +39,7 @@ export function KeysView() {
     onError: (error) => setNotice(errorMessage(error))
   })
 
-  if (config.isPending) return <Loading label="Loading keys" />
+  if (config.isPending) return <Loading label={COPY.state.loadingKeys} />
   if (config.isError) return <ErrorPanel error={config.error} onRetry={() => void config.refetch()} />
 
   const settings = config.data.settings
@@ -46,23 +47,21 @@ export function KeysView() {
   return (
     <div className="stack">
       <div className="view-head">
-        <h1>API keys</h1>
+        <h1>{COPY.keys.title}</h1>
         <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-          New key
+          {COPY.keys.add}
         </button>
       </div>
 
       {notice !== null ? <Banner message={notice} onDismiss={() => setNotice(null)} /> : null}
 
       <p className="muted small">
-        {settings.require_client_key
-          ? "Client keys are required: requests without a valid key are rejected."
-          : "Client keys are optional: unknown callers are admitted, but keys still carry rate limits and model allowlists."}{" "}
-        A rate limit of 0 means unlimited.
+        {settings.require_client_key ? COPY.keys.requireHint : COPY.keys.optionalHint}{" "}
+        {COPY.keys.rateLimitHint}
       </p>
 
       {revealed !== null ? (
-        <Card title="Copy the new key now" subtitle="The secret is shown once, on creation, and never returned again." padded>
+        <Card title={COPY.keys.revealTitle} subtitle={COPY.keys.secretOnce} padded>
           <div className="copy-row">
             <input className="input mono" value={revealed} readOnly onFocus={(event) => event.currentTarget.select()} />
           </div>
@@ -73,38 +72,38 @@ export function KeysView() {
               onClick={() => {
                 void navigator.clipboard
                   .writeText(revealed)
-                  .catch(() => setNotice("Clipboard unavailable — select the field and copy manually."))
+                  .catch(() => setNotice(COPY.keys.clipboardUnavailable))
               }}
             >
-              Copy
+              {COPY.action.copy}
             </button>
             <button type="button" className="btn" onClick={() => setRevealed(null)}>
-              Done
+              {COPY.action.done}
             </button>
           </div>
         </Card>
       ) : null}
 
-      <Card title={`${config.data.keys.length} keys`}>
+      <Card title={COPY.keys.countTitle(config.data.keys.length)}>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Key</th>
-                <th>Enabled</th>
-                <th className="num">RPM</th>
-                <th>Allowed models</th>
-                <th className="num">Requests</th>
-                <th>Last used</th>
-                <th>Actions</th>
+                <th>{COPY.field.name}</th>
+                <th>{COPY.field.secret}</th>
+                <th>{COPY.field.enabled}</th>
+                <th className="num">{COPY.keys.rpm}</th>
+                <th>{COPY.field.allowedModels}</th>
+                <th className="num">{COPY.column.requests}</th>
+                <th>{COPY.keys.lastUsed}</th>
+                <th>{COPY.column.actions}</th>
               </tr>
             </thead>
             <tbody>
               {config.data.keys.length === 0 ? (
                 <tr>
                   <td className="empty" colSpan={8}>
-                    No keys yet.
+                    {COPY.keys.empty}
                   </td>
                 </tr>
               ) : null}
@@ -112,20 +111,20 @@ export function KeysView() {
                 <tr key={key.id}>
                   <td>
                     <div className="cell-title">{key.name}</div>
-                    <div className="muted small">created {formatDateTime(key.created_at)}</div>
+                    <div className="muted small">{COPY.keys.createdAt(formatDateTime(key.created_at))}</div>
                   </td>
                   <td className="mono small">{key.masked}</td>
                   <td>
                     <Toggle
                       checked={key.enabled}
-                      ariaLabel={`Enable ${key.name}`}
+                      ariaLabel={COPY.keys.enableToggle(key.name)}
                       onChange={(enabled) => toggleEnabled.mutate({ key, enabled })}
                     />
                   </td>
-                  <td className="num">{key.rate_limit_rpm === 0 ? "unlimited" : formatInt(key.rate_limit_rpm)}</td>
+                  <td className="num">{key.rate_limit_rpm === 0 ? COPY.keys.unlimited : formatInt(key.rate_limit_rpm)}</td>
                   <td>
                     {key.allowed_models.length === 0 ? (
-                      <span className="muted small">all models</span>
+                      <span className="muted small">{COPY.keys.allModels}</span>
                     ) : (
                       <span className="tag-list">
                         {key.allowed_models.map((model) => (

@@ -232,7 +232,20 @@ export const COPY = {
     byProviderHint: "各上游在该窗口内的合计",
     noProviderTraffic: "该时间窗口内没有上游流量。",
     degraded: "服务未就绪",
-    degradedHint: (detail: string) => `每个请求都会失败：${detail}`
+    degradedHint: (detail: string) => `每个请求都会失败：${detail}`,
+    /** The stat shows the raw `enabled / total` ratio; this names the two numbers. */
+    providersRatio: "已启用 / 总数",
+    sessionsReuse: (pinned: number, reused: number) => `已固定 ${pinned} 个会话 · 复用 ${reused} 次`,
+    trafficTitle: (window: string) => `请求流量 · 最近 ${window}`,
+    trafficSubtitle: "默认窗口内所有上游的合计",
+    noTraffic: "暂无流量",
+    errorRateHint: (rate: string) => `占请求数的 ${rate}`,
+    costHint: "由上游上报",
+    ttftHint: "首个 Token 的延迟",
+    cacheBarLabel: (rate: string) => `输入缓存命中率 ${rate}`,
+    cacheNote: (cached: string, prompt: string) => `${prompt} 个输入 Token 中有 ${cached} 个来自上游缓存。`,
+    requestsOverTime: "请求随时间变化",
+    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`
   },
 
   providers: {
@@ -240,6 +253,10 @@ export const COPY = {
     subtitle: "上游连接、健康状态与余额",
     add: "添加上游",
     edit: "编辑上游",
+    editTitle: (name: string) => `编辑上游 ${name}`,
+    listTitle: (count: number) => `${count} 个上游`,
+    settingsLine: (strategy: string, timeout: string, interval: string) =>
+      `默认策略：${strategy} · 请求超时 ${timeout} · 每 ${interval} 秒拉取一次模型`,
     empty: "还没有配置上游。添加一个之后才能路由请求。",
     baseUrlHint: "不要带 /v1，网关会自动拼接接口路径。",
     apiKeyHint: "留空表示沿用已有密钥；表格中只显示掩码。",
@@ -298,7 +315,23 @@ export const COPY = {
     allowedModelsHint: "每行一个模型名；留空表示允许全部模型。",
     deleteConfirm: "删除后使用该密钥的客户端会立即失效。确定删除吗？",
     lastUsed: "最近使用",
-    totalRequests: "累计请求"
+    totalRequests: "累计请求",
+    optionalHint: "客户端密钥为可选项：未知调用方会被放行，但密钥仍然承担限速与模型白名单。",
+    revealTitle: "立即复制新密钥",
+    clipboardUnavailable: "无法访问剪贴板——请选中输入框手动复制。",
+    countTitle: (count: number) => `${count} 个密钥`,
+    rpm: "RPM",
+    allModels: "全部模型",
+    unlimited: "不限速",
+    createdAt: (time: string) => `创建于 ${time}`,
+    enableToggle: (name: string) => `启用 ${name}`,
+    editTitle: (name: string) => `编辑密钥：${name}`,
+    secretGenerated: "密钥留空时由网关生成，创建后只显示这一次。",
+    secretImmutable: "密钥本身无法修改或再次查看；如需轮换请删除后重建。",
+    namePlaceholder: "prod-app",
+    modelsPlaceholder: "gpt-4o\nclaude-*",
+    doneButton: "我已保存",
+    actions: "操作"
   },
 
   usage: {

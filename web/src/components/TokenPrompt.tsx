@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { readToken, setManualTokenPrompt, setTokenPrompt, writeToken } from "../lib/api.ts"
+import { COPY } from "../lib/copy.ts"
 import { Modal } from "./ui.tsx"
 
 type PendingPrompt = {
@@ -78,7 +79,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
       {children}
       {open ? (
         <Modal
-          title="Admin token required"
+          title={COPY.token.title}
           onClose={() => finish(null)}
           footer={
             <>
@@ -86,15 +87,12 @@ export function TokenGate({ children }: { children: ReactNode }) {
                 Cancel
               </button>
               <button type="button" className="btn btn-primary" onClick={() => finish(value.trim())}>
-                Save and retry
+                {COPY.action.save}
               </button>
             </>
           }
         >
-          <p className="muted">
-            The admin API rejected the request with <code>401</code>. Paste the token configured as{" "}
-            <code>admin_token</code> in the gateway config.
-          </p>
+          <p className="muted">{COPY.token.reject}</p>
           <form
             onSubmit={(event) => {
               event.preventDefault()
@@ -102,7 +100,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
             }}
           >
             <label className="field">
-              <span className="field-label">Admin token</span>
+              <span className="field-label">{COPY.token.label}</span>
               <input
                 type="password"
                 className="input mono"
@@ -110,15 +108,15 @@ export function TokenGate({ children }: { children: ReactNode }) {
                 autoFocus
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="admin_token"
+                placeholder={COPY.token.placeholder}
                 onChange={(event) => setValue(event.currentTarget.value)}
               />
             </label>
             <button type="submit" className="visually-hidden">
-              Save
+              {COPY.action.save}
             </button>
           </form>
-          <p className="muted small">Stored in this browser only, as localStorage["agg2api.token"].</p>
+          <p className="muted small">{COPY.token.hint}</p>
         </Modal>
       ) : null}
     </>
