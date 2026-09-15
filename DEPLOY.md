@@ -242,7 +242,7 @@ is `AGG2API_` plus the key uppercased — `db_path` → `AGG2API_DB_PATH`.
 | `AGG2API_MAX_BODY_BYTES` | `16777216` | |
 | `AGG2API_DISCOVERY_INTERVAL_S` | `3600` | `0` disables background refresh. |
 | `AGG2API_LOG_RETENTION_DAYS` | `30` | **`0` keeps everything and grows without bound.** |
-| `AGG2API_BREAKER_FAILURE_THRESHOLD` | `3` | Failures before a provider leaves rotation; `0` disables the breaker. |
+| `AGG2API_BREAKER_FAILURE_THRESHOLD` | `3` | **On/off switch only** — any value > 0 enables the breaker, `0` disables it. Not yet compared against a failure count, so one failure removes a provider for the whole cooldown. |
 | `AGG2API_BREAKER_COOLDOWN_BASE_MS` / `_MAX_MS` | `5000` / `300000` | Bounds of the exponential cooldown. |
 | `AGG2API_SESSION_TTL_MS` | `1800000` | Cache-affinity pin lifetime; `0` disables. |
 | `AGG2API_SESSION_MAX_ENTRIES` | `10000` | Tracked sessions before the oldest pins are evicted. |
