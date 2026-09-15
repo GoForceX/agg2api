@@ -167,6 +167,13 @@ export type AdminConfig = {
   routes: Route[]
   keys: ApiKeyMasked[]
   settings: Settings
+  /** Whether models.dev is loaded; its absence is why capabilities can be null. */
+  capabilities_index: {
+    loaded: boolean
+    models: number
+    age_ms: number | null
+    error: string | null
+  }
 }
 
 export type Overview = {

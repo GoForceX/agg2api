@@ -154,6 +154,17 @@ export function ProvidersView() {
         />
       ) : null}
 
+      {/* An unreachable models.dev silently degrades every inferred capability to null,
+          which reads exactly like "these models have no capabilities". Say so. */}
+      {config.data.capabilities_index.loaded ? null : (
+        <Banner
+          tone="warn"
+          message={`${COPY.providers.capabilitiesIndexMissing}${
+            config.data.capabilities_index.error === null ? "" : `（${config.data.capabilities_index.error}）`
+          }`}
+        />
+      )}
+
       <Card
         title={COPY.providers.listTitle(config.data.providers.length)}
         subtitle={COPY.providers.settingsLine(

@@ -136,6 +136,20 @@ export const ConfigSnapshot = Schema.Struct({
     require_client_key: Schema.Boolean,
     request_timeout_ms: Schema.Number,
     discovery_interval_s: Schema.Number
+  }),
+  /**
+   * Whether the models.dev capability catalogue is loaded.
+   *
+   * Surfaced because its absence is otherwise invisible: a gateway that cannot reach
+   * models.dev reports `capabilities: null` for every model whose provider does not
+   * describe itself, which looks exactly like "these models genuinely have no
+   * capabilities". Without this an operator has no way to tell the two apart.
+   */
+  capabilities_index: Schema.Struct({
+    loaded: Schema.Boolean,
+    models: Schema.Number,
+    age_ms: Schema.NullOr(Schema.Number),
+    error: Schema.NullOr(Schema.String)
   })
 })
 export type ConfigSnapshot = typeof ConfigSnapshot.Type

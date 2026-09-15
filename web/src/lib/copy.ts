@@ -338,6 +338,8 @@ export const COPY = {
     currencyPlaceholder: "USD",
     modelAllowPlaceholder: "gpt-*\no1-*",
     modelDenyPlaceholder: "*-preview\n*-audio-*",
+    /** Shown when models.dev is unreachable, so null capabilities are explained. */
+    capabilitiesIndexMissing: "models.dev 未加载，无法推断模型能力",
     priceNote: (currency: string) => `价格按每百万 Token 计；用量费用以 ${currency} 结算。`
   },
 

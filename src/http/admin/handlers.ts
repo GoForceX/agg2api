@@ -33,6 +33,7 @@ import { createProvider, deleteProvider, getProvider, listModels, listModelsForP
 import { createRoute, deleteRoute, listRoutes, updateRoute } from "../../db/routes.ts"
 import { logPage, series, summary } from "../../db/usage.ts"
 import { discoverAll as discoverEveryProvider, discoverProvider, refreshCredits, syncRoutes } from "../../gateway/discovery.ts"
+import { indexStatus } from "../../models/capabilities.ts"
 import { probeProvider } from "../../gateway/executor.ts"
 import { Sessions } from "../../gateway/sessions.ts"
 import { AppSettings, StartedAt } from "../../gateway/settings.ts"
@@ -291,7 +292,8 @@ export const admin = {
           require_client_key: settings.require_client_key,
           request_timeout_ms: settings.request_timeout_ms,
           discovery_interval_s: settings.discovery_interval_s
-        }
+        },
+        capabilities_index: indexStatus()
       }
     }),
 

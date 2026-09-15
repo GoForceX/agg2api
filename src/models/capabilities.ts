@@ -18,7 +18,7 @@
 import * as Effect from "effect/Effect"
 import type * as HttpClient from "@effect/platform/HttpClient"
 import * as Schema from "effect/Schema"
-import { asBoolean, asString, isRecord } from "../json.ts"
+import { asBoolean, asNumber, asString, isRecord } from "../json.ts"
 
 /**
  * An input or output modality.
@@ -195,6 +195,10 @@ interface CatalogueModel {
   readonly name: string | null
   readonly input: ReadonlyArray<Modality>
   readonly output: ReadonlyArray<Modality>
+  /** Context window, from `limit.context`. */
+  readonly context: number | null
+  /** Max output tokens, from `limit.output`. */
+  readonly maxOutput: number | null
   readonly tool_call: boolean | null
   readonly reasoning: boolean | null
   readonly structured_output: boolean | null
@@ -220,10 +224,13 @@ const toCatalogueModel = (entry: Record<string, unknown>): CatalogueModel | null
   const modalities = isRecord(entry.modalities) ? entry.modalities : null
   const input = modalityList(modalities?.input)
   if (input.length === 0) return null
+  const limit = isRecord(entry.limit) ? entry.limit : null
   return {
     name: asString(entry.name),
     input,
     output: modalityList(modalities?.output),
+    context: asNumber(limit?.context),
+    maxOutput: asNumber(limit?.output),
     tool_call: asBoolean(entry.tool_call),
     reasoning: asBoolean(entry.reasoning),
     structured_output: asBoolean(entry.structured_output),
@@ -246,6 +253,10 @@ export const normaliseModelId = (id: string): string =>
     .replace(/[-_:]?20\d{2}[-_]?\d{2}[-_]?\d{2}$/, "")
     .replace(/[-_:]?\d{8}$/, "")
     .replace(/[-:](latest|preview|beta|exp|stable|free)$/, "")
+    // Last, so a suffix colon is consumed first: `gpt-4o:latest` is the `latest` tag,
+    // while `cn:glm-5.3-flash` carries a pool namespace that is routing metadata rather
+    // than part of the model's name.
+    .replace(/^[a-z0-9_-]+:/, "")
     .replace(/^[-_]+|[-_]+$/g, "")
 
 /** Host of a base URL, lower-cased, without port or path. */
@@ -353,6 +364,72 @@ const nearest = (
   return { model: best.model, agreeing: best.n, total: candidates.length, unanimous: counts.size === 1 }
 }
 
+/**
+ * Process-wide cache of the `models.dev` document.
+ *
+ * Shared rather than passed in per call, because the inference is the same document for
+ * every caller and one caller has none of its own: a per-provider refresh from the admin
+ * UI used to pass `null`, which rewrote every capability it had already inferred back to
+ * `null`. Losing data on a refresh is worse than a stale answer.
+ *
+ * Module-level state matches the rest of the gateway's single-process design (the rate
+ * limiter and the session store are the same shape). It is an optimisation cache, not a
+ * source of truth: losing it costs one fetch.
+ */
+let cached: { readonly index: CatalogueIndex; readonly at: number } | null = null
+
+/** Why the last fetch failed, for the admin UI. `null` while the index is loaded. */
+let lastError: string | null = null
+
+/** How long a cached document is reused before it is fetched again. */
+const INDEX_TTL_MS = 6 * 60 * 60 * 1000
+
+/** The index, from cache when fresh, otherwise fetched. `null` when unavailable. */
+export const cachedIndex = (
+  client: HttpClient.HttpClient
+): Effect.Effect<CatalogueIndex | null> =>
+  Effect.gen(function* () {
+    if (cached !== null && Date.now() - cached.at < INDEX_TTL_MS) return cached.index
+    const fetched = yield* fetchIndex(client)
+    // A failed fetch keeps the previous document: capabilities already inferred stay
+    // correct, and the next caller retries rather than seeing a spurious blank.
+    if (fetched === null) return cached?.index ?? null
+    cached = { index: fetched, at: Date.now() }
+    lastError = null
+    return fetched
+  })
+
+/** Force a fetch, for the maintenance pass. Falls back to the cached document. */
+export const refreshIndex = (
+  client: HttpClient.HttpClient
+): Effect.Effect<CatalogueIndex | null> =>
+  Effect.gen(function* () {
+    const fetched = yield* fetchIndex(client)
+    if (fetched === null) {
+      // Recorded rather than swallowed: without it an unreachable models.dev is
+      // indistinguishable from a model that genuinely has no capabilities, and the
+      // operator has no way to tell why `/v1/models` reports nothing.
+      lastError = `${MODELS_DEV_URL} could not be read`
+      return cached?.index ?? null
+    }
+    cached = { index: fetched, at: Date.now() }
+    lastError = null
+    return fetched
+  })
+
+/** Whether the catalogue is loaded, and why not when it is not. */
+export const indexStatus = (): {
+  readonly loaded: boolean
+  readonly models: number
+  readonly age_ms: number | null
+  readonly error: string | null
+} => ({
+  loaded: cached !== null,
+  models: cached?.index.size ?? 0,
+  age_ms: cached === null ? null : Date.now() - cached.at,
+  error: lastError
+})
+
 const fromCatalogue = (model: CatalogueModel, source: CapabilitySource): ModelCapabilities => ({
   input: model.input,
   output: model.output.length > 0 ? model.output : ["text"],
@@ -370,6 +447,24 @@ export interface InferInput {
   readonly baseUrl: string
   /** Tier-1 claim, when the provider's model list carried one. */
   readonly reported: ReportedCapabilities | null
+  /** Context window the provider reported, when it reported one. */
+  readonly reportedContextLength?: number | null
+  /** Max output tokens the provider reported, when it reported one. */
+  readonly reportedMaxOutput?: number | null
+}
+
+/**
+ * Everything inferred about one model.
+ *
+ * Capabilities and limits travel together because they come from the same lookup:
+ * resolving them separately would query the catalogue twice for one model and let the
+ * two answers disagree about which tier supplied them.
+ */
+export interface ModelFacts {
+  readonly capabilities: ModelCapabilities | null
+  /** `null` when neither the provider nor the catalogue stated it. */
+  readonly context_length: number | null
+  readonly max_output_tokens: number | null
 }
 
 /**
@@ -379,30 +474,64 @@ export interface InferInput {
  * prints no capability rather than a guess — and it is why the tiers are explicit
  * rather than collapsed into "check upstream, else look up".
  */
-export const inferCapabilities = (
-  index: CatalogueIndex | null,
-  input: InferInput
-): ModelCapabilities | null => {
-  if (input.reported !== null) return fromReported(input.reported)
-  if (index === null) return null
+export const resolveModel = (index: CatalogueIndex | null, input: InferInput): ModelFacts => {
+  // The provider's own numbers win over anything inferred, tier by tier, exactly as
+  // capabilities do. A provider that reports a context window knows its own limits.
+  const reportedContext = input.reportedContextLength ?? null
+  const reportedMax = input.reportedMaxOutput ?? null
 
-  // Tier 2: the provider is identified by its base URL, so only its own claims about
-  // the model are considered. A reseller serving a reduced variant is answered by the
+  if (input.reported !== null) {
+    return {
+      capabilities: fromReported(input.reported),
+      context_length: reportedContext,
+      max_output_tokens: reportedMax
+    }
+  }
+  if (index === null) {
+    return {
+      capabilities: null,
+      context_length: reportedContext,
+      max_output_tokens: reportedMax
+    }
+  }
+
+  // Tier 2: the provider is identified by its base URL, so only its own claims about the
+  // model are considered. A reseller serving a reduced variant is answered by the
   // reseller's entry, not by the plurality of everyone else.
   const host = hostOf(input.baseUrl)
   const provider = host === null ? undefined : index.byHost.get(host)
   if (provider !== undefined) {
     const model = withinProvider(provider, input.upstreamId)
-    if (model !== null) return fromCatalogue(model, "models.dev")
+    if (model !== null) {
+      return {
+        capabilities: fromCatalogue(model, "models.dev"),
+        context_length: reportedContext ?? model.context,
+        max_output_tokens: reportedMax ?? model.maxOutput
+      }
+    }
+    // The provider is known but does not list this id. Falling through rather than
+    // giving up is what covers a proxy in front of a known provider: it serves
+    // `deepseek-v4-pro` while models.dev's own DeepSeek entry lists only `deepseek-chat`,
+    // and the id vote still answers correctly.
   }
 
   // Tier 3: the provider is unknown (a self-hosted proxy, a bare IP), so the id is all
   // there is to go on. A single dissenter among many is noise; a genuinely split vote
   // means the id is ambiguous and guessing would be worse than saying nothing.
+  //
+  // Limits are still filled from the winning entry even when capabilities are too
+  // ambiguous to state: a context window is far less variant-dependent than modality
+  // support, and a client needs it to decide whether a prompt fits.
   const voted = nearest(index, input.upstreamId)
-  if (voted === null) return null
-  if (!voted.unanimous && voted.agreeing * 2 <= voted.total) return null
-  return fromCatalogue(voted.model, "models.dev-nearest")
+  if (voted === null) {
+    return { capabilities: null, context_length: reportedContext, max_output_tokens: reportedMax }
+  }
+  const ambiguous = !voted.unanimous && voted.agreeing * 2 <= voted.total
+  return {
+    capabilities: ambiguous ? null : fromCatalogue(voted.model, "models.dev-nearest"),
+    context_length: reportedContext ?? voted.model.context,
+    max_output_tokens: reportedMax ?? voted.model.maxOutput
+  }
 }
 
 /**

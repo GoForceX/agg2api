@@ -15,10 +15,12 @@ import { isRecord } from "../json.ts"
 import { createProvider, listModels, listModelsForProvider, listProviders, replaceProviderModels } from "../db/providers.ts"
 import { getCredits, saveCredits } from "../db/credits.ts"
 import { createRoute, listRoutes, resolveTargets } from "../db/routes.ts"
+import type { UpstreamModel } from "../upstream/adapter.ts"
 import { adapterFor } from "./executor.ts"
 import {
-  fetchIndex,
-  inferCapabilities,
+  cachedIndex,
+  refreshIndex,
+  resolveModel,
   reportedCapabilities,
   type CatalogueIndex
 } from "../models/capabilities.ts"
@@ -64,14 +66,48 @@ const isAllowed = (provider: Provider, publicId: string): boolean => {
  * not stop the others from refreshing, and the admin UI shows the error next to
  * that provider.
  */
+/**
+ * Resolve a discovered model's capabilities and limits.
+ *
+ * Kept in one function because both come from the same three-tier lookup: computing them
+ * at separate call sites is how the two would end up disagreeing about which tier
+ * answered, and about which model they answered for.
+ */
+const factsFor = (
+  index: CatalogueIndex | null,
+  provider: Provider,
+  model: UpstreamModel
+): { capabilities: DiscoveredModel["capabilities"]; context_length: number | null; max_output_tokens: number | null } => {
+  const facts = resolveModel(index, {
+    upstreamId: model.id,
+    baseUrl: provider.base_url,
+    reported: isRecord(model.raw) ? reportedCapabilities(model.raw) : null,
+    // The provider's own numbers are tier 1 for limits, just as its modality claims are
+    // for capabilities.
+    reportedContextLength: model.context_length,
+    reportedMaxOutput: model.max_output_tokens
+  })
+  return {
+    capabilities: facts.capabilities,
+    context_length: facts.context_length,
+    max_output_tokens: facts.max_output_tokens
+  }
+}
+
 export const discoverProvider = (
   provider: Provider,
-  /** `models.dev` index, or `null` when it could not be fetched. */
-  index: CatalogueIndex | null = null
+  /** `models.dev` index. When omitted it is taken from the shared cache. */
+  index?: CatalogueIndex | null
 ): Effect.Effect<DiscoveryResult, never, HttpClient.HttpClient | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const adapter = adapterFor(provider.kind)
+
+    // Resolved from the cache rather than defaulted to `null`: the admin UI's per-provider
+    // refresh has no index of its own, and defaulting there rewrote every capability it had
+    // already inferred back to `null` — a refresh that loses data.
+    const client = yield* HttpClient.HttpClient
+    const catalogue = index === undefined ? yield* cachedIndex(client) : index
 
     const listed = yield* adapter.listModels(provider).pipe(
       Effect.map((models) => ({ ok: true as const, models })),
@@ -113,13 +149,7 @@ export const discoverProvider = (
         provider_id: provider.id,
         upstream_id: model.id,
         public_id: publicId,
-        context_length: model.context_length,
-        max_output_tokens: model.max_output_tokens,
-        capabilities: inferCapabilities(index, {
-          upstreamId: model.id,
-          baseUrl: provider.base_url,
-          reported: isRecord(model.raw) ? reportedCapabilities(model.raw) : null
-        }),
+        ...factsFor(catalogue, provider, model),
         owned_by: model.owned_by,
         last_seen: ts
       })
@@ -149,7 +179,7 @@ export const discoverAll = (): Effect.Effect<
     // Fetched once per pass, not per provider: it is a single shared document, and a
     // fetch per provider would multiply a 4 MB download by the size of the fleet.
     const client = yield* HttpClient.HttpClient
-    const index = yield* fetchIndex(client)
+    const index = yield* refreshIndex(client)
 
     return yield* Effect.forEach(enabled, (provider) => discoverProvider(provider, index), {
       concurrency: 4
