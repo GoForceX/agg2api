@@ -19,6 +19,7 @@ import type { Provider } from "../domain.ts"
 import { ProviderError, providerError } from "../errors.ts"
 import { asBoolean, asNumber, asRecordArray, asString, isRecord } from "../json.ts"
 import { eventsToChunk, fromResponses, toResponsesBody } from "../responses/convert.ts"
+import type { PendingToolCall } from "../responses/convert.ts"
 import type { Adapter, UpstreamModel } from "./adapter.ts"
 import { getRequest } from "./chat-adapter.ts"
 import { decodeJson, execute, postJson, transportFailure } from "./http.ts"
@@ -139,6 +140,10 @@ export const responsesAdapter: Adapter = {
       // Run here rather than inside the returned stream: a rejected request must be
       // observable before the gateway commits to this provider.
       const response = yield* execute(provider, postJson(provider, RESPONSES_PATH, body))
+      // Tool names and call ids are announced once, on `output_item.added`, and the
+      // argument deltas that follow carry neither — so identity has to be carried
+      // across events for the duration of one stream.
+      const pending = new Map<string, PendingToolCall>()
       const chunks = response.stream.pipe(
         sse.parse,
         Stream.map(parsePayload),
@@ -146,7 +151,7 @@ export const responsesAdapter: Adapter = {
         Stream.mapEffect((event) => {
           const failure = failureOf(event, provider)
           if (failure !== null) return Effect.fail(failure)
-          return Effect.succeed(eventsToChunk(event, model))
+          return Effect.succeed(eventsToChunk(event, model, pending))
         }),
         Stream.filter((chunk): chunk is Chat.Chunk => chunk !== null),
         // A `ProviderError` raised above is already classified; everything else is

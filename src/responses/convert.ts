@@ -309,7 +309,10 @@ export const toResponsesBody = (request: Chat.Request, model: string): Record<st
       })
       continue
     }
-    const text = typeof message.content === "string" ? message.content : ""
+    // An assistant turn's text can arrive as a content-part array (a client echoing back
+    // what it received), so it needs the same extraction the `system` and `tool` branches
+    // use — otherwise the turn is dropped and two user turns become adjacent.
+    const text = typeof message.content === "string" ? message.content : partsText(message.content)
     if (message.role === "assistant") {
       // Text precedes the calls it accompanies, matching how the items are read
       // back on the next turn.
@@ -797,19 +800,51 @@ export const completedEvent = (
 }
 
 /**
+ * Tool-call identity learned from `response.output_item.added`.
+ *
+ * The delta that follows carries only the item id, so without this the function name
+ * and `call_id` are unrecoverable: the name appears nowhere else in the stream, and
+ * `call_id` (what a replayed `tool_result` must reference) is distinct from the item id.
+ */
+export type PendingToolCall = { readonly name: string; readonly call_id: string }
+
+/**
  * Translate one Responses event back into a canonical chunk.
  *
- * Only the delta events carry chat-shaped information. The item envelopes
- * (`response.output_item.added`, `response.completed`'s siblings) carry none, and
- * returning a chunk for them would double-count tokens in the usage accumulator.
- * The terminal `response.completed` is the exception: its usage is the only place
- * a Responses stream reports billing.
+ * Only the delta events carry chat-shaped information. The terminal
+ * `response.completed` is the exception: its usage is the only place a Responses
+ * stream reports billing.
+ *
+ * `pending` accumulates the state the delta events omit — which tools have been
+ * announced, and under what name and call id. It is mutated rather than returned
+ * because events are processed in one ordered pass, and it is required rather than
+ * defaulted so a caller cannot silently lose tool identity by re-creating it per event.
  */
-export const eventsToChunk = (event: Record<string, unknown>, model: string): Chat.Chunk | null => {
+export const eventsToChunk = (
+  event: Record<string, unknown>,
+  model: string,
+  pending: Map<string, PendingToolCall>
+): Chat.Chunk | null => {
   const type = textOf(event.type)
   const delta = textOf(event.delta)
   const created = Math.floor(Date.now() / 1000)
   const id = asString(event.item_id)
+
+  // Names the tool before any argument fragment arrives. Returning null keeps the
+  // item envelope out of the chunk stream, so usage is still counted exactly once.
+  if (type === "response.output_item.added") {
+    const item = recordOf(event.item)
+    const itemId = asString(item.id)
+    if (textOf(item.type) === "function_call" && itemId !== null) {
+      pending.set(itemId, {
+        name: asString(item.name) ?? "",
+        // `call_id` is what the upstream expects echoed back; the item id is a fallback
+        // for providers that omit it.
+        call_id: asString(item.call_id) ?? itemId
+      })
+    }
+    return null
+  }
 
   if (type === "response.output_text.delta") {
     return {
@@ -833,6 +868,7 @@ export const eventsToChunk = (event: Record<string, unknown>, model: string): Ch
   }
   if (type === "response.function_call_arguments.delta") {
     const index = asNumber(event.output_index) ?? 0
+    const announced = id === null ? undefined : pending.get(id)
     return {
       id: id ?? `resp_${crypto.randomUUID()}`,
       object: "chat.completion.chunk",
@@ -843,7 +879,12 @@ export const eventsToChunk = (event: Record<string, unknown>, model: string): Ch
           index: 0,
           delta: {
             tool_calls: [
-              { index, id: id ?? "", type: "function", function: { name: "", arguments: delta } }
+              {
+                index,
+                id: announced?.call_id ?? id ?? "",
+                type: "function",
+                function: { name: announced?.name ?? "", arguments: delta }
+              }
             ] as Chat.ToolCall[]
           },
           finish_reason: null
@@ -854,12 +895,18 @@ export const eventsToChunk = (event: Record<string, unknown>, model: string): Ch
   }
   if (type === "response.completed") {
     const response = recordOf(event.response)
+    // A Responses stream reports the tool-call ending only here, so the finish reason
+    // has to be derived now. Without it an Anthropic client sees `end_turn` on a turn
+    // that requires a tool and stops instead of executing it.
+    const calledTool = asRecordArray(response.output).some((item) => textOf(item.type) === "function_call")
     return {
       id: asString(response.id) ?? `resp_${crypto.randomUUID()}`,
       object: "chat.completion.chunk",
       created: asNumber(response.created_at) ?? created,
       model: asString(response.model) ?? model,
-      choices: [],
+      choices: calledTool
+        ? [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+        : [],
       usage: fromResponsesUsage(response.usage)
     }
   }

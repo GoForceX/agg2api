@@ -30,6 +30,12 @@ export const parse = (
   body.pipe(
     Stream.decodeText(),
     Stream.splitLines,
+    // A frame is only emitted once a blank line closes it, so a body that ends without
+    // one loses its final frame — which is normally the `usage` chunk. Providers do this
+    // whenever they close the connection right after the last event, so synthesise the
+    // terminator rather than dropping the payload. The sentinel cannot collide with real
+    // input because `splitLines` never yields an empty line itself.
+    Stream.concat(Stream.succeed("")),
     Stream.mapAccum(
       // Accumulates the `data:` lines of the frame currently being read.
       [] as ReadonlyArray<string>,

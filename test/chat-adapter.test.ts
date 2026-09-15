@@ -193,6 +193,46 @@ describe("openaiChatAdapter.stream", () => {
       await mock.stop()
     }
   })
+
+  test("keeps the usage chunk when upstream closes without a trailing blank line", async () => {
+    // Providers routinely close straight after the last event, leaving the final frame
+    // unterminated. Dropping it loses the usage chunk — the only source of cached-token
+    // counts — so every such request would be billed as zero cache hits.
+    const content = { index: 0, delta: { content: "Hi" }, finish_reason: null }
+    const body =
+      `data: ${JSON.stringify({
+        id: "chunk-1",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "upstream-model",
+        choices: [content]
+      })}\n\n` +
+      `data: ${JSON.stringify({
+        id: "chunk-2",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "upstream-model",
+        choices: [],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 5,
+          total_tokens: 105,
+          prompt_tokens_details: { cached_tokens: 60 }
+        }
+      })}`
+    const mock = serve(() => new Response(body, { headers: { "content-type": "text/event-stream" } }))
+    try {
+      const upstream = await run(openaiChatAdapter.stream(target(mock.port), request({ stream: true })))
+      const chunks = Array.from(await run(Stream.runCollect(upstream.sse)))
+
+      expect(chunks.flatMap((chunk) => chunk.choices.map((choice) => choice.delta.content ?? "")).join("")).toBe("Hi")
+      const usage = chunks.at(-1)?.usage
+      expect(usage?.prompt_tokens).toBe(100)
+      expect(usage?.cached_tokens).toBe(60)
+    } finally {
+      await mock.stop()
+    }
+  })
 })
 
 describe("failures", () => {
@@ -377,6 +417,33 @@ describe("fetchCredits", () => {
       expect(credits.total).toBe(99)
       expect(credits.healthy).toBe(0)
       expect(credits.accounts).toHaveLength(1)
+    } finally {
+      await mock.stop()
+    }
+  })
+
+  test("fails on a 200 whose body is an error instead of reporting an empty pool", async () => {
+    // Proxies commonly report failure as HTTP 200 with an error body. Reading that as a
+    // zero-credit pool would show a funded account as empty and — because the caller
+    // stores a successful snapshot — destroy the last known balance.
+    const mock = serve(() => json({ error: { message: "unauthorized" } }))
+    try {
+      const failure = await runFailure(fetchCredits(provider(mock.port, { kind: "workbuddy2api" })))
+      expect(failure.kind).toBe("network")
+      expect(failure.status).toBe(200)
+      expect(failure.message).toBe("unauthorized")
+    } finally {
+      await mock.stop()
+    }
+  })
+
+  test("accepts an empty but well-formed pool", async () => {
+    const mock = serve(() => json({ accounts: [], total: 0, healthy: 0 }))
+    try {
+      const credits = await run(fetchCredits(provider(mock.port, { kind: "workbuddy2api" })))
+      expect(credits.total).toBe(0)
+      expect(credits.accounts).toHaveLength(0)
+      expect(credits.error).toBeNull()
     } finally {
       await mock.stop()
     }

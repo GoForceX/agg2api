@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream"
 import type * as Chat from "../src/canonical.ts"
 import type { Provider } from "../src/domain.ts"
 import type { ProviderError } from "../src/errors.ts"
+import type { PendingToolCall } from "../src/responses/convert.ts"
 import {
   chunkToEvents,
   completedEvent,
@@ -376,26 +377,43 @@ describe("streaming events", () => {
   })
 
   test("eventsToChunk keeps only the delta events and the terminal usage", () => {
-    expect(eventsToChunk({ type: "response.output_item.added" }, "m")).toBeNull()
-    expect(eventsToChunk({ type: "response.content_part.added" }, "m")).toBeNull()
+    const pending = new Map<string, PendingToolCall>()
+    expect(eventsToChunk({ type: "response.content_part.added" }, "m", pending)).toBeNull()
+    // An item envelope is recorded but yields no chunk, so usage is counted once.
+    expect(
+      eventsToChunk(
+        {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "get_weather" }
+        },
+        "m",
+        pending
+      )
+    ).toBeNull()
 
     const text = eventsToChunk(
       { type: "response.output_text.delta", item_id: "msg_1", delta: "hi" },
-      "m"
+      "m",
+      pending
     )
     expect(text?.choices[0]?.delta.content).toBe("hi")
 
     const reasoning = eventsToChunk(
       { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "why" },
-      "m"
+      "m",
+      pending
     )
     expect(reasoning?.choices[0]?.delta.reasoning_content).toBe("why")
 
+    // The name and call id come from the announced item, not from this delta.
     const args = eventsToChunk(
       { type: "response.function_call_arguments.delta", item_id: "fc_1", output_index: 2, delta: '{"q"' },
-      "m"
+      "m",
+      pending
     )
     expect(args?.choices[0]?.delta.tool_calls?.[0]?.function.arguments).toBe('{"q"')
+    expect(args?.choices[0]?.delta.tool_calls?.[0]?.function.name).toBe("get_weather")
+    expect(args?.choices[0]?.delta.tool_calls?.[0]?.id).toBe("call_1")
 
     const terminal = eventsToChunk(
       {
@@ -413,7 +431,8 @@ describe("streaming events", () => {
           }
         }
       },
-      "m"
+      "m",
+      pending
     )
     expect(terminal?.choices).toEqual([])
     expect(terminal?.usage?.prompt_tokens).toBe(4)

@@ -11,10 +11,10 @@ import * as HttpClient from "@effect/platform/HttpClient"
 import * as Effect from "effect/Effect"
 import { asBoolean, asNumber, asRecordArray, asString, firstNumber, isRecord } from "../json.ts"
 import type { Credits, CreditsAccount, Provider } from "../domain.ts"
-import type { ProviderError } from "../errors.ts"
+import { providerError, type ProviderError } from "../errors.ts"
 import type { Adapter } from "./adapter.ts"
 import { chatCompletion, getRequest } from "./chat-adapter.ts"
-import { decodeJson, execute, transportFailure } from "./http.ts"
+import { decodeJson, errorMessageFrom, execute, transportFailure } from "./http.ts"
 
 const STATUS_PATH = "/status"
 
@@ -38,9 +38,25 @@ export const fetchCredits = (
     const json = yield* decodeJson(provider, body)
     // Recent builds wrap the snapshot in `{data: …}`; older ones answer flat.
     const payload = isRecord(json) && isRecord(json.data) ? json.data : json
-    const accounts = isRecord(payload) ? asRecordArray(payload.accounts).map(toAccount) : []
-    const total = isRecord(payload) ? asNumber(payload.total) : null
-    const healthy = isRecord(payload) ? asNumber(payload.healthy) : null
+    // A proxy often reports failure as HTTP 200 with an error body. That is not an
+    // empty pool: treating it as one would report a funded account as zero and — via
+    // `refreshCredits` — overwrite the last known balance with it. A real snapshot
+    // always carries the list, even when the pool is empty.
+    if (!isRecord(payload) || !Array.isArray(payload.accounts)) {
+      return yield* Effect.fail(
+        providerError({
+          provider_id: provider.id,
+          provider_name: provider.name,
+          kind: "network",
+          status: 200,
+          message: errorMessageFrom(body, "upstream returned no account list"),
+          body
+        })
+      )
+    }
+    const accounts = asRecordArray(payload.accounts).map(toAccount)
+    const total = asNumber(payload.total)
+    const healthy = asNumber(payload.healthy)
 
     return {
       provider_id: provider.id,
@@ -49,8 +65,8 @@ export const fetchCredits = (
         healthy ?? accounts.filter((account) => account.cooling !== true && account.disabled !== true).length,
       accounts,
       fetched_at: Date.now(),
-      // Adapters never invent a partial failure: an unreachable provider fails the
-      // effect, so a returned snapshot is always a complete one.
+      // Adapters never invent a partial failure: anything short of a complete
+      // snapshot fails the effect, so a returned one is always usable.
       error: null
     }
   })
