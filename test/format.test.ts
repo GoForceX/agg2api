@@ -21,9 +21,14 @@ describe("formatCredits", () => {
     expect(formatCredits(999.9)).toBe("999.9")
   })
 
-  test("still compacts genuinely large balances", () => {
-    expect(formatCredits(1234.5)).toBe("1.2k")
-    expect(formatCredits(12_500)).toBe("12.5k")
+  test("keeps the exact figure for balances an operator is budgeting", () => {
+    // A 7032-credit pool is actionable to the digit; "7.0k" is not.
+    expect(formatCredits(2256)).toBe("2,256")
+    expect(formatCredits(4776)).toBe("4,776")
+    expect(formatCredits(7032)).toBe("7,032")
+  })
+
+  test("only abbreviates a pool large enough that digits stop mattering", () => {
     expect(formatCredits(250_000)).toBe("250k")
     expect(formatCredits(1_500_000)).toBe("1.5M")
   })

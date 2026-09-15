@@ -17,7 +17,8 @@
     "tutorial": "bun run scripts/tutorial-check.ts",
     "failover": "bun run scripts/failover.ts",
     "breaker-share": "bun run scripts/breaker-share.ts",
-    "route-strategy": "bun run scripts/route-strategy.ts"
+    "route-strategy": "bun run scripts/route-strategy.ts",
+    "ui-check": "bun run scripts/ui-check.ts"
   },
   "dependencies": {
     "@effect/experimental": "0.61.1",

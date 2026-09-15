@@ -38,9 +38,12 @@ export function formatCompact(value: number | null | undefined): string {
 export function formatCredits(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return DASH
   const abs = Math.abs(value)
+  // A balance is a budget, so the exact figure matters more than brevity: 7032 reads as
+  // "7,032" rather than "7.0k". Only a genuinely large pool is abbreviated, where the
+  // precise digits stop being actionable.
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (abs >= 100_000) return `${(value / 1000).toFixed(0)}k`
-  if (abs >= 1000) return `${(value / 1000).toFixed(1)}k`
+  if (abs >= 100_000) return `${Math.round(value / 1000)}k`
+  if (abs >= 1000) return Math.round(value).toLocaleString(LOCALE)
   // Up to two decimals, trailing zeros dropped: 10.5 stays 10.5, 10.25 stays 10.25.
   return value.toFixed(2).replace(/\.?0+$/, "") || "0"
 }
