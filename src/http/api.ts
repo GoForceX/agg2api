@@ -20,6 +20,8 @@ import * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint"
 import * as HttpApiGroup from "@effect/platform/HttpApiGroup"
 import * as HttpApiSchema from "@effect/platform/HttpApiSchema"
 import * as Schema from "effect/Schema"
+import { AdminAuth } from "./admin/auth.ts"
+import { AdminUnauthorized } from "./admin/errors.ts"
 import { ApiKeyCreated, ApiKeyInput, ApiKeyMasked, Credits, Provider, ProviderInput, ProviderStatus, Route, RouteInput, UsageAggregate, UsagePoint, UsageSummary } from "../domain.ts"
 import { DiscoveredModel } from "../domain.ts"
 
@@ -68,7 +70,13 @@ const adminError = <const S extends 400 | 401 | 404 | 500>(status: S) =>
   })
 
 export const AdminBadRequest = adminError(400)
-export const AdminUnauthorized = adminError(401)
+/**
+ * Shared with the auth middleware, which is why it comes from `admin/errors.ts` rather
+ * than being built by the `adminError` factory below: the middleware's declared failure
+ * and the group's declared 401 have to be one and the same schema for the encoder to
+ * find a member of its union that fits.
+ */
+export { AdminUnauthorized }
 export const AdminNotFound = adminError(404)
 export const AdminServerError = adminError(500)
 
@@ -268,6 +276,10 @@ const ops = HttpApiGroup.make("ops").add(
  * had only declared 401.
  */
 const admin = HttpApiGroup.make("admin")
+  // Authentication rides the group, so the router's own matching decides what is
+  // guarded. A path-prefix check in middleware could be bypassed with casing or
+  // duplicate slashes that the router normalises but a prefix comparison does not.
+  .middleware(AdminAuth)
   .addError(AdminBadRequest, { status: 400 })
   .addError(AdminUnauthorized, { status: 401 })
   .addError(AdminNotFound, { status: 404 })

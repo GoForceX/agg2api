@@ -130,8 +130,15 @@ export const resolve = (
     }
 
     for (const [key, expected] of Object.entries(FILE_KEYS)) {
-      const raw = env[ENV_PREFIX + key.toUpperCase()]
+      const name = `${ENV_PREFIX}${key.toUpperCase()}`
+      const raw = env[name]
       if (raw === undefined) continue
+      // A blank value means "unset", not zero or empty. Compose env files, systemd
+      // `Environment=` and `docker run -e NAME=` all produce one when the source
+      // variable is undefined, and coercing it is actively harmful: "" as a number is
+      // 0, which *disables* retention, discovery and session affinity, and "" as a
+      // path makes the admin file mount root at the process working directory.
+      if (raw === "") continue
       if (expected === "string") {
         merged[key] = raw
       } else if (expected === "boolean") {
@@ -158,11 +165,19 @@ export const resolve = (
       }
     }
 
-    const settings = yield* Schema.decodeUnknown(Settings)(merged).pipe(
+    const decoded = yield* Schema.decodeUnknown(Settings)(merged).pipe(
       Effect.mapError(
         (error) => new ConfigError({ source: "settings", message: String(error) })
       )
     )
+
+    // A blank path from config.json is the same hazard as a blank environment variable:
+    // it would root the admin file mount at the process working directory. Normalising
+    // here covers both sources.
+    const settings: Settings = {
+      ...decoded,
+      web_root: decoded.web_root !== null && decoded.web_root.trim() !== "" ? decoded.web_root : null
+    }
 
     // An unauthenticated admin surface on a public interface is a misconfiguration
     // worth refusing outright: it exposes provider keys and lets anyone repoint traffic.

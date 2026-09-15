@@ -27,6 +27,7 @@ import { discoverAll, refreshCredits } from "./gateway/discovery.ts"
 import { Sessions, makeSessionStore } from "./gateway/sessions.ts"
 import { AppSettings, StartedAt } from "./gateway/settings.ts"
 import { adminHandlers } from "./http/admin/handlers.ts"
+import { adminAuthLayer } from "./http/admin/auth.ts"
 import { adminMiddleware } from "./http/admin/middleware.ts"
 import { api } from "./http/api.ts"
 import { opsHandlers, v1Handlers } from "./http/handlers-v1.ts"
@@ -149,7 +150,10 @@ const coreLayers = (settings: Settings) =>
   )
 
 const application = (settings: Settings) => {
-  const webRoot = settings.web_root ?? defaultWebRoot()
+  // `??` alone is not enough: an empty string is "present" and would resolve to the
+  // process working directory, exposing the database and repository files through the
+  // unauthenticated /admin/* mount.
+  const webRoot = settings.web_root !== null && settings.web_root.trim() !== "" ? settings.web_root : defaultWebRoot()
 
   const core = coreLayers(settings)
 
@@ -157,10 +161,16 @@ const application = (settings: Settings) => {
   // AppSettings, SqlClient, HttpClient and HttpServer, which plain `provide` would
   // consume and hide.
   return HttpApiBuilder.serve(
-    adminMiddleware({ web_root: webRoot, admin_token: settings.admin_token })
+    adminMiddleware({ web_root: webRoot })
   ).pipe(
     Layer.provide(HttpApiBuilder.api(api)),
-    Layer.provide(Layer.mergeAll(v1Handlers, opsHandlers, adminHandlers)),
+    // The admin group's middleware is resolved when its routes are built, so the guard
+    // is supplied to the group layers rather than to the server.
+    Layer.provide(
+      Layer.mergeAll(v1Handlers, opsHandlers, adminHandlers).pipe(
+        Layer.provide(adminAuthLayer(settings.admin_token))
+      )
+    ),
     Layer.provideMerge(core),
     Layer.provideMerge(liveLayer(settings.db_path)),
     Layer.provideMerge(BunHttpServer.layer({ hostname: settings.host, port: settings.port }))

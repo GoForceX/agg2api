@@ -37,6 +37,31 @@ describe("config resolution", () => {
     expect(settings.discovery_interval_s).toBe(0)
   })
 
+  test("treats a blank environment variable as unset rather than as zero", async () => {
+    // Compose env files, systemd `Environment=` and `docker run -e NAME=` all pass a
+    // variable through as "" when its source is undefined. Coercing that to 0 turns
+    // each of these limits into its opposite.
+    const settings = await ok(
+      { discovery_interval_s: 3600, log_retention_days: 30, session_ttl_ms: 1_800_000, web_root: "/srv/ui" },
+      {
+        AGG2API_DISCOVERY_INTERVAL_S: "",
+        AGG2API_LOG_RETENTION_DAYS: "",
+        AGG2API_SESSION_TTL_MS: "",
+        AGG2API_WEB_ROOT: ""
+      }
+    )
+    expect(settings.discovery_interval_s).toBe(3600)
+    expect(settings.log_retention_days).toBe(30)
+    expect(settings.session_ttl_ms).toBe(1_800_000)
+    // A blank web root must not become the process working directory: that path is
+    // served unauthenticated under /admin/*.
+    expect(settings.web_root).toBe("/srv/ui")
+  })
+
+  test("treats a blank web_root in the file as unset", async () => {
+    expect((await ok({ web_root: "  " })).web_root).toBeNull()
+  })
+
   test("booleans arrive from the environment as strings", async () => {
     expect((await ok({}, { AGG2API_REQUIRE_CLIENT_KEY: "true" })).require_client_key).toBe(true)
     expect((await ok({}, { AGG2API_REQUIRE_CLIENT_KEY: "false" })).require_client_key).toBe(false)

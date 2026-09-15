@@ -14,6 +14,7 @@
  */
 import type { SqlError } from "@effect/sql/SqlError"
 import * as Effect from "effect/Effect"
+import * as HttpApiSchema from "@effect/platform/HttpApiSchema"
 import * as Schema from "effect/Schema"
 
 /** Reason phrase per status, so every failure carries an operator-readable label. */
@@ -37,11 +38,27 @@ export class AdminBadRequest extends Schema.TaggedError<AdminBadRequest>()(
   envelope(400)
 ) {}
 
-/** The caller is not authorised. */
-export class AdminUnauthorized extends Schema.TaggedError<AdminUnauthorized>()(
-  "AdminUnauthorized",
-  envelope(401)
-) {}
+/**
+ * The caller is not authorised.
+ *
+ * Reused from `domain.ts` rather than built by `envelope(401)` here, because the auth
+ * middleware declares the same status and the group encodes that failure with the first
+ * member of its union that fits. Two structurally separate 401 schemas do not unify, so
+ * the encoded failure found no match and the response became a 500. Sharing one
+ * definition is what keeps the middleware's failure encodable.
+ */
+export const AdminUnauthorized = Schema.Struct({
+  status: Schema.Literal(401),
+  error: Schema.String,
+  detail: Schema.optional(Schema.String)
+}).annotations({
+  identifier: "AdminUnauthorized",
+  // This annotation, not the `{ status: 401 }` passed to `addError`, is what sets the
+  // response status. Without it the encoder has no status for the failure and the
+  // request answers 500 instead of 401.
+  [HttpApiSchema.AnnotationStatus]: 401
+})
+export type AdminUnauthorized = typeof AdminUnauthorized.Type
 
 /** No row has the identity the request named. */
 export class AdminNotFound extends Schema.TaggedError<AdminNotFound>()(
@@ -72,8 +89,11 @@ export const notFound = (detail: string): AdminNotFound =>
   new AdminNotFound({ status: 404, error: REASON[404], detail })
 
 /** The caller is not authorised. */
-export const unauthorized = (detail: string): AdminUnauthorized =>
-  new AdminUnauthorized({ status: 401, error: REASON[401], detail })
+export const unauthorized = (detail: string): AdminUnauthorized => ({
+  status: 401,
+  error: REASON[401],
+  detail
+})
 
 /**
  * Run a repository call, replacing any `SqlError` with the admin envelope.

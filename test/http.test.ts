@@ -204,6 +204,59 @@ describe("admin API over HTTP", () => {
     expect((await request("/admin/")).status).toBe(200)
   })
 
+  test("authorises every path spelling the router maps to an admin endpoint", async () => {
+    // The router matches case-insensitively, collapses duplicate slashes, decodes
+    // percent-escapes and ignores a trailing slash. A guard built on a literal
+    // `/admin/api` prefix therefore protected only the canonical spelling, and every
+    // variant below reached the handlers — including writes and the endpoint that
+    // returns provider credentials — without a token.
+    const bypasses = [
+      "/ADMIN/API/OVERVIEW",
+      "//admin/api/overview",
+      "///admin/api/overview",
+      "/%61dmin/api/overview",
+      "/ADMIN/API/OVERVIEW/",
+      "/admin/API/Overview",
+      "/ADMIN/API/../API/overview"
+    ]
+    for (const path of bypasses) {
+      const response = await fetch(`${base}${path}`)
+      const text = await response.text()
+      // The invariant is that no spelling yields admin data without a token. Each one
+      // is either rejected outright, or served the SPA shell by the static mount —
+      // which matches the literal lowercase `/admin/` prefix, so a mixed-case path
+      // never reaches the API and falls through to the shell instead.
+      const rejected = response.status === 401
+      const shell = text.includes("<div id=\"root\">")
+      expect({ path, safe: rejected || shell, adminData: text.includes("providers_total") }).toEqual({
+        path,
+        safe: true,
+        adminData: false
+      })
+    }
+
+    // Every one of these routed to the admin API before the fix, so each must now be
+    // rejected rather than merely not leaking.
+    for (const path of bypasses.filter((candidate) => candidate !== "/admin/API/Overview")) {
+      expect({ path, status: (await fetch(`${base}${path}`)).status }).toEqual({ path, status: 401 })
+    }
+
+    // And a write, which is the consequence that matters.
+    const write = await fetch(`${base}//admin/api/keys`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "bypass" })
+    })
+    expect(write.status).toBe(401)
+
+    // A token still works on a non-canonical spelling, so the fix rejects nothing
+    // legitimate.
+    const allowed = await fetch(`${base}//admin/api/overview`, {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` }
+    })
+    expect(allowed.status).toBe(200)
+  })
+
   test("decodes a numeric path parameter and updates the row", async () => {
     const id = await createProvider({ name: "patchable", kind: "openai-chat", base_url: upstream.base })
 
