@@ -109,6 +109,8 @@ let workdir = ""
 let upstream: Mock
 let gateway: ReturnType<typeof Bun.spawn>
 let base = ""
+let providerId = 0
+
 let db: Database
 
 const request = (path: string, init?: RequestInit) => fetch(`${base}${path}`, init)
@@ -177,7 +179,7 @@ beforeAll(async () => {
 
   db = new Database(dbPath)
 
-  await createProvider({
+  providerId = await createProvider({
     name: "primary",
     kind: "openai-chat",
     base_url: upstream.base,
@@ -452,6 +454,60 @@ describe("admin API over HTTP", () => {
     const body = (await response.json()) as { credits: { total: number; accounts: unknown[] } | null }
     expect(body.credits?.total).toBe(500)
     expect(body.credits?.accounts.length).toBe(1)
+  })
+})
+
+describe("model metadata resolution", () => {
+  test("reads metadata through the route's targets, not by matching the public id", async () => {
+    // A route's `public_model` and a provider's `public_id` are different namespaces. A
+    // pool reports `test-model` but an operator (or a rename) may route it as something
+    // else; a lookup keyed on the provider's own name found nothing and reported
+    // `capabilities: null`, which is indistinguishable from "this model supports nothing".
+    const aliased = "aliased-model"
+    const created = await admin("/admin/api/routes", {
+      method: "POST",
+      body: JSON.stringify({
+        public_model: aliased,
+        strategy: null,
+        enabled: true,
+        display_name: "Aliased",
+        targets: [{ provider_id: providerId, upstream_model: "test-model", priority: 100, enabled: true }]
+      })
+    })
+    expect(created.status).toBe(200)
+
+    const listed = (await (await request("/v1/models")).json()) as {
+      data: Array<{
+        id: string
+        display_name: string | null
+        context_length: number | null
+        max_output_tokens: number | null
+        capabilities: { input: string[] } | null
+      }>
+    }
+    const row = listed.data.find((model) => model.id === aliased)
+    expect(row).toBeDefined()
+    // `test-model` is synthetic: the upstream reports only limits, and models.dev has no
+    // entry for it, so `capabilities: null` is the honest answer here. The point of the
+    // test is that the *limits* resolve through the alias — before the fix this row was
+    // wholly empty, because the lookup matched the provider's public id and found nothing.
+    expect(row?.context_length).toBe(8000)
+    expect(row?.max_output_tokens).toBe(512)
+    expect(row?.capabilities).toBeNull()
+
+    // The single-model view must agree with the list rather than reporting no name.
+    const single = (await (await request(`/v1/models/${aliased}`)).json()) as {
+      display_name: string | null
+      context_length: number | null
+    }
+    expect(single.display_name).toBe("Aliased")
+    expect(single.context_length).toBe(8000)
+
+    // The Anthropic listing reads the same resolution.
+    const anthropic = (await (await request("/anthropic/v1/models")).json()) as {
+      data: Array<{ id: string; max_input_tokens: number | null }>
+    }
+    expect(anthropic.data.find((model) => model.id === aliased)?.max_input_tokens).toBe(8000)
   })
 })
 

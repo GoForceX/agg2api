@@ -369,17 +369,43 @@ export const catalogue = (): Effect.Effect<
     return out
   })
 
-/** Metadata for one public model, taken from any provider that reported it. */
+/**
+ * Metadata for one public model, taken from the providers its route actually targets.
+ *
+ * Resolved through the route's targets rather than by matching `provider_models.public_id`
+ * against the requested name. Those are two different namespaces: a route's `public_model`
+ * is chosen by the operator (or generated from the upstream's public id), while a
+ * provider's `public_id` is whatever its own catalogue says. A pool that reports
+ * `cn:glm-5.3` and a route named `glm-5.3` are the same model, but a lookup keyed on the
+ * provider's name finds nothing and reports `capabilities: null` for a model that has
+ * capabilities — which reads exactly like "this model supports nothing".
+ */
 export const modelMetadata = (
   publicModel: string
 ): Effect.Effect<DiscoveredModel | null, never, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const models = yield* listModels(sql).pipe(Effect.orDie)
-    const matches = models.filter((model) => model.public_id === publicModel)
-    // Prefer an entry that carries a context window: providers report differing
-    // amounts of metadata and the richest one is the most useful to a client.
-    return matches.find((model) => model.context_length !== null) ?? matches[0] ?? null
+    const resolved = yield* resolveTargets(sql, publicModel).pipe(Effect.orDie)
+
+    const matches: DiscoveredModel[] = []
+    for (const entry of resolved.targets) {
+      const models = yield* listModelsForProvider(sql, entry.target.provider_id).pipe(Effect.orDie)
+      // Keyed on the *upstream* id, which is what the provider itself calls the model and
+      // therefore what its discovered row is stored under.
+      const match = models.find((model) => model.upstream_id === entry.target.upstream_model)
+      if (match !== undefined) matches.push(match)
+    }
+
+    // Prefer an entry that carries capabilities and limits: providers report differing
+    // amounts of metadata, and the richest answer is the most useful to a client. Falling
+    // back to a bare entry would report `null` for a model another provider described.
+    return (
+      matches.find((model) => model.capabilities !== null && model.context_length !== null) ??
+      matches.find((model) => model.capabilities !== null) ??
+      matches.find((model) => model.context_length !== null) ??
+      matches[0] ??
+      null
+    )
   })
 
 export { createProvider }

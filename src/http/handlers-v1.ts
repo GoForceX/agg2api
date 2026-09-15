@@ -588,14 +588,13 @@ const modelCard = Effect.gen(function* () {
   const id = decodeURIComponent(new URL(request.url, "http://localhost").pathname.replace(/^\/v1\/models\//, ""))
 
   const metadata = yield* modelMetadata(id)
-  if (metadata === null) {
-    const live = yield* catalogue()
-    if (!live.some((entry) => entry.public_model === id)) {
-      // 404, not 400: the request is well-formed, the model simply does not exist. The
-      // endpoint declares a 404 for exactly this case, and every OpenAI-shaped client
-      // maps a 400 to "my request was malformed".
-      return yield* Effect.fail(notFound(`no such model: ${id}`, "model"))
-    }
+  const live = yield* catalogue()
+  const entry = live.find((candidate) => candidate.public_model === id)
+  if (entry === undefined) {
+    // 404, not 400: the request is well-formed, the model simply does not exist. The
+    // endpoint declares a 404 for exactly this case, and every OpenAI-shaped client
+    // maps a 400 to "my request was malformed".
+    return yield* Effect.fail(notFound(`no such model: ${id}`, "model"))
   }
 
   const card: ModelCard = {
@@ -603,11 +602,14 @@ const modelCard = Effect.gen(function* () {
     object: "model",
     created: 1700000000,
     owned_by: "agg2api",
-    display_name: null,
+    // Read from the route, so the single-model view agrees with the list rather than
+    // always reporting no display name.
+    display_name: entry.display_name,
     context_length: metadata?.context_length ?? null,
     max_output_tokens: metadata?.max_output_tokens ?? null,
     capabilities: metadata?.capabilities ?? null,
-    supports_images: metadata?.capabilities?.input.includes("image") ?? false
+    supports_images: metadata?.capabilities?.input.includes("image") ?? false,
+    providers: [...entry.providers]
   }
   return card
 })
