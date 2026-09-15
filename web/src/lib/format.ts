@@ -64,12 +64,14 @@ export function formatClock(ts: number): string {
 
 export function formatDateTime(ts: number | null | undefined): string {
   if (ts === null || ts === undefined || !Number.isFinite(ts) || ts <= 0) return DASH
-  return new Date(ts).toLocaleString("en-US", {
-    month: "short",
+  return new Date(ts).toLocaleString(LOCALE, {
+    year: "numeric",
+    month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit"
+    second: "2-digit",
+    hour12: false
   })
 }
 

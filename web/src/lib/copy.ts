@@ -234,7 +234,6 @@ export const COPY = {
     degraded: "服务未就绪",
     degradedHint: (detail: string) => `每个请求都会失败：${detail}`,
     /** The stat shows the raw `enabled / total` ratio; this names the two numbers. */
-    providersRatio: "已启用 / 总数",
     sessionsReuse: (pinned: number, reused: number) => `已固定 ${pinned} 个会话 · 复用 ${reused} 次`,
     trafficTitle: (window: string) => `请求流量 · 最近 ${window}`,
     trafficSubtitle: "默认窗口内所有上游的合计",
@@ -285,7 +284,48 @@ export const COPY = {
       state: "状态"
     },
     disabled: "已停用",
-    cooling: "冷却中"
+    cooling: "冷却中",
+    /** Provider table headings that no other view shares. */
+    credits: "余额",
+    actions: "操作",
+    discoverAll: "全部拉取模型",
+    discoveringAll: "正在拉取全部上游…",
+    refreshCredits: "刷新余额",
+    hideAccounts: "收起账户",
+    routedCount: (count: number) => `已路由 ${count} 个模型`,
+    notRouted: "未路由",
+    enableToggle: (name: string) => `启用 ${name}`,
+    lastSuccessAt: (time: string) => `成功 ${time}`,
+    noSuccess: "还没有成功记录",
+    noCreditSnapshot: "还没有余额数据，点击“刷新余额”获取。",
+    noAccounts: "上游没有返回任何账户。",
+    healthyAccountsLabel: "可用账户",
+    discoverAllOk: (total: number) => `已在 ${total} 个上游上完成拉取。`,
+    discoverAllFailed: (total: number, failed: number, detail: string) =>
+      `${total} 个上游中有 ${failed} 个拉取失败：${detail}`,
+    discoverProviderResult: (id: number, added: number, removed: number, total: number) =>
+      `上游 ${id}：新增 ${added} 个模型，移除 ${removed} 个，共 ${total} 个`,
+    creditsFailed: (message: string) => `余额获取失败：${message}`,
+    testResultOk: (model: string, latency: string, reply: string) =>
+      `连通正常 · ${model} · ${latency} · “${reply}”`,
+    testResultFailed: (model: string, message: string) => `连接失败 · ${model}：${message}`,
+    kindHint: "上游协议类型",
+    apiKeyNewHint: "作为上游凭据发送；新建时必须填写。",
+    apiKeyRequired: "新建上游必须填写 API 密钥",
+    priorityHint: "优先级越高越先被选中；加权策略下同时作为权重",
+    maxRetries: "最大重试次数",
+    maxRetriesHint: "切换到其它上游之前，在本上游内部的重试次数",
+    modelRename: "模型重命名",
+    modelRenameHint: "暂无重命名。左侧填上游模型名，右侧填对外模型名。",
+    modelAllowHint: "每行一个通配符；留空表示允许全部模型。",
+    modelDeny: "排除的模型",
+    modelDenyHint: "每行一个通配符；在允许列表之后应用。",
+    headerNamePlaceholder: "请求头名称",
+    headerValuePlaceholder: "值",
+    namePlaceholder: "openai-main",
+    modelAllowPlaceholder: "gpt-*\no1-*",
+    modelDenyPlaceholder: "*-preview\n*-audio-*",
+    priceNote: (currency: string) => `价格按每百万 Token 计；用量费用以 ${currency} 结算。`
   },
 
   routes: {
@@ -340,7 +380,7 @@ export const COPY = {
     byProvider: "按上游统计",
     byModel: "按模型统计",
     log: "请求日志",
-    logHint: "最近 500 条以内",
+    logHint: "按时间倒序，配合下方筛选",
     filters: "筛选",
     window: "时间窗口",
     allProviders: "全部上游",
@@ -352,7 +392,19 @@ export const COPY = {
     cached: "命中缓存",
     notCached: "未命中缓存",
     attemptsHint: (n: number) => `尝试 ${n} 次`,
-    empty: "该时间窗口内没有用量数据。"
+    empty: "该时间窗口内没有用量数据。",
+    byKey: "按密钥统计",
+    breakdown: "分组统计",
+    totalsLast: (window: string) => `最近 ${window} 合计`,
+    bucketEvery: (bucket: string) => `每 ${bucket} 聚合一个数据点`,
+    requestsOverTime: "请求趋势",
+    chartLabel: (window: string) => `最近 ${window} 内每个统计区间的请求数`,
+    reasoningTokens: "推理 Token",
+    requestId: "请求 ID",
+    ttft: "首字延迟",
+    filteredTotals: (rows: string) => `筛选结果合计 · 共 ${rows} 条`,
+    noModelTraffic: "该时间窗口内没有模型流量。",
+    noKeyTraffic: "该时间窗口内没有密钥流量。"
   },
 
   toast: {

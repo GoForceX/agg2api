@@ -8,7 +8,7 @@ import { createRoute, deleteRoute, getRoute, listRoutes, resolveTargets, updateR
 import { createKey, deleteKey, getKeyByValue, listKeys, maskKey, touchKey, updateKey } from "../src/db/keys.ts"
 import { getProviderStatus, listProviderStatuses, recordFailure, recordSuccess, resetProviderHealth } from "../src/db/health.ts"
 import { getCredits, listCredits, saveCredits } from "../src/db/credits.ts"
-import { insertUsage, logPage, purgeOlderThan, summary } from "../src/db/usage.ts"
+import { insertUsage, logPage, purgeOlderThan, series, summary } from "../src/db/usage.ts"
 import type { DiscoveredModel, UsageEntry } from "../src/domain.ts"
 
 const model = (id: string, publicId = id): DiscoveredModel => ({
@@ -289,7 +289,66 @@ describe("credits", () => {
   })
 })
 
+describe("route writes", () => {
+  test("a failed target replacement rolls back instead of emptying the route", async () => {
+    await runScoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const provider = yield* createProvider(sql, {
+          name: "keep",
+          kind: "openai-chat",
+          base_url: "https://keep.test"
+        })
+        yield* createRoute(sql, {
+          public_model: "atomic",
+          strategy: "priority",
+          targets: [{ provider_id: provider.id, upstream_model: "keep-1", priority: 1, enabled: true }]
+        })
+
+        // `replaceTargets` deletes before it inserts, and the target below references a
+        // provider that does not exist (foreign keys are on), so the insert fails after
+        // the delete. Without a transaction the route would survive with zero targets —
+        // enabled, but serving nothing.
+        const failed = yield* Effect.either(
+          updateRoute(sql, "atomic", {
+            targets: [{ provider_id: 999_999, upstream_model: "ghost", priority: 1, enabled: true }]
+          })
+        )
+        expect(failed._tag).toBe("Left")
+
+        const after = yield* resolveTargets(sql, "atomic")
+        expect(after.targets.map((entry) => entry.target.upstream_model)).toEqual(["keep-1"])
+      })
+    )
+  })
+})
+
 describe("usage", () => {
+  test("series groups by bucket, not by the raw timestamp", async () => {
+    await runScoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const bucket = 60_000
+        // Anchor on a bucket boundary so every row lands in the same bucket.
+        const base = Math.floor(Date.now() / bucket) * bucket
+
+        for (let offset = 0; offset < 6; offset += 1) {
+          yield* insertUsage(sql, usage({ ts: base + offset * 1000, status: 200 }))
+        }
+
+        const points = yield* series(sql, 3_600_000, bucket)
+        const inBucket = points.filter((point) => point.ts === base)
+
+        // `GROUP BY ts` resolves to the input column in SQLite, so the six rows would
+        // come back as six points of one request each — one chart bar per request
+        // instead of per bucket, with duplicate React keys.
+        expect(inBucket).toHaveLength(1)
+        expect(inBucket[0]?.requests).toBe(6)
+        expect(points.every((point) => point.ts % bucket === 0)).toBe(true)
+      })
+    )
+  })
+
   test("summary computes cache rate and buckets by model, provider and key", async () => {
     await runScoped(
       Effect.gen(function* () {

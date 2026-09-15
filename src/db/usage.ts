@@ -168,6 +168,10 @@ export const series = (
   Effect.gen(function* () {
     const since = Date.now() - windowMs
     const width = Math.max(1, Math.floor(bucketMs))
+    // Group by the bucket *expression* (ordinal 1), never by the `ts` alias: SQLite
+    // resolves an ambiguous name to the input column, so grouping by `ts` groups by the
+    // raw millisecond timestamp and emits one row per request instead of per bucket —
+    // which flattened every chart into a per-request plot with duplicate React keys.
     const rows = yield* sql<SeriesRow>`
       SELECT (ts / ${width}) * ${width} AS ts,
              COUNT(*) AS requests,
@@ -177,7 +181,7 @@ export const series = (
              COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
              COALESCE(SUM(cost), 0) AS cost
       FROM usage_log WHERE ts >= ${since}
-      GROUP BY ts ORDER BY ts ASC
+      GROUP BY 1 ORDER BY 1 ASC
     `
     return rows.map((row) => ({
       ts: row.ts,

@@ -78,7 +78,7 @@ export function KeysView() {
               {COPY.action.copy}
             </button>
             <button type="button" className="btn" onClick={() => setRevealed(null)}>
-              {COPY.action.done}
+              {COPY.keys.doneButton}
             </button>
           </div>
         </Card>
@@ -94,9 +94,9 @@ export function KeysView() {
                 <th>{COPY.field.enabled}</th>
                 <th className="num">{COPY.keys.rpm}</th>
                 <th>{COPY.field.allowedModels}</th>
-                <th className="num">{COPY.column.requests}</th>
+                <th className="num">{COPY.keys.totalRequests}</th>
                 <th>{COPY.keys.lastUsed}</th>
-                <th>{COPY.column.actions}</th>
+                <th>{COPY.keys.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -140,9 +140,13 @@ export function KeysView() {
                   <td>
                     <div className="row-actions">
                       <button type="button" className="btn btn-small" onClick={() => setEditing(key)}>
-                        Edit
+                        {COPY.action.edit}
                       </button>
-                      <ConfirmButton onConfirm={() => remove.mutate(key.id)} label="Delete" confirmLabel="Confirm delete" />
+                      <ConfirmButton
+                        onConfirm={() => remove.mutate(key.id)}
+                        label={COPY.action.delete}
+                        confirmLabel={COPY.action.confirmDelete}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -154,7 +158,7 @@ export function KeysView() {
 
       {creating ? (
         <KeyForm
-          title="New key"
+          title={COPY.keys.add}
           draft={EMPTY_KEY}
           onClose={() => setCreating(false)}
           onCreated={(created) => {
@@ -167,7 +171,7 @@ export function KeysView() {
 
       {editing !== null ? (
         <KeyForm
-          title={`Edit ${editing.name}`}
+          title={COPY.keys.editTitle(editing.name)}
           draft={{
             name: editing.name,
             enabled: editing.enabled,
@@ -207,7 +211,7 @@ function KeyForm({
   const save = useMutation({
     mutationFn: async () => {
       const name = form.name.trim()
-      if (name.length === 0) throw new Error("Name is required")
+      if (name.length === 0) throw new Error(COPY.validation.nameRequired)
       const rpm = Number(form.rate_limit_rpm.trim())
       const input: ApiKeyInput = {
         name,
@@ -228,10 +232,10 @@ function KeyForm({
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {COPY.action.cancel}
           </button>
           <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : keyId === undefined ? "Create" : "Save"}
+            {save.isPending ? COPY.action.saving : keyId === undefined ? COPY.action.create : COPY.action.save}
           </button>
         </>
       }
@@ -239,16 +243,16 @@ function KeyForm({
       {error !== null ? <Banner tone="bad" message={error} onDismiss={() => setError(null)} /> : null}
 
       <div className="form-grid">
-        <Field label="Name">
+        <Field label={COPY.field.name}>
           <input
             className="input"
             value={form.name}
-            placeholder="prod-app"
+            placeholder={COPY.keys.namePlaceholder}
             onChange={(event) => patch({ name: event.currentTarget.value })}
           />
         </Field>
 
-        <Field label="Rate limit" hint="Requests per minute; 0 = unlimited">
+        <Field label={COPY.field.rateLimit} hint={COPY.keys.rateLimitHint}>
           <input
             className="input"
             type="number"
@@ -258,24 +262,24 @@ function KeyForm({
           />
         </Field>
 
-        <Field label="Allowed models" hint="One glob per line; empty allows every public model">
+        <Field label={COPY.field.allowedModels} hint={COPY.keys.allowedModelsHint}>
           <textarea
             className="input mono"
             rows={4}
             value={form.allowed_models}
-            placeholder={"gpt-4o\nclaude-*"}
+            placeholder={COPY.keys.modelsPlaceholder}
             spellCheck={false}
             onChange={(event) => patch({ allowed_models: event.currentTarget.value })}
           />
         </Field>
       </div>
 
-      <Toggle checked={form.enabled} label="Enabled" onChange={(enabled) => patch({ enabled })} />
+      <Toggle checked={form.enabled} label={COPY.field.enabled} onChange={(enabled) => patch({ enabled })} />
 
       {keyId === undefined ? (
-        <p className="muted small">Leave the secret blank and the gateway generates one, shown once after creation.</p>
+        <p className="muted small">{COPY.keys.secretGenerated}</p>
       ) : (
-        <p className="muted small">The key secret itself cannot be changed or re-read; delete and recreate to rotate.</p>
+        <p className="muted small">{COPY.keys.secretImmutable}</p>
       )}
     </Modal>
   )

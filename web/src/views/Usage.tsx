@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { COPY } from "../lib/copy.ts"
 import { formatCompact, formatCost, formatDateTime, formatInt, formatMs } from "../lib/format.ts"
 import { parseUsageLog } from "../lib/log.ts"
 import { WINDOWS, useAdminConfig, useUsage, useUsageLog } from "../lib/queries.ts"
@@ -11,7 +12,11 @@ const PAGE_SIZE = 50
 
 type Tab = "model" | "provider" | "key"
 
-const TAB_LABEL: Record<Tab, string> = { model: "By model", provider: "By provider", key: "By key" }
+const TAB_LABEL: Record<Tab, string> = {
+  model: COPY.usage.byModel,
+  provider: COPY.usage.byProvider,
+  key: COPY.usage.byKey
+}
 
 export function UsageView() {
   const config = useAdminConfig()
@@ -57,10 +62,10 @@ export function UsageView() {
   return (
     <div className="stack">
       <div className="view-head">
-        <h1>Usage</h1>
+        <h1>{COPY.usage.title}</h1>
         <div className="row-actions">
           <label className="inline-field">
-            <span className="field-label">Window</span>
+            <span className="field-label">{COPY.usage.window}</span>
             <select
               className="input"
               value={windowId}
@@ -77,39 +82,47 @@ export function UsageView() {
             </select>
           </label>
           <button type="button" className="btn" onClick={() => void usage.refetch()}>
-            Refresh
+            {COPY.action.refresh}
           </button>
         </div>
       </div>
 
-      <Card title={`Totals · last ${selected.label}`} subtitle={`Bucketed every ${formatMs(selected.bucketMs)}`} padded>
+      <Card
+        title={COPY.usage.totalsLast(selected.label)}
+        subtitle={COPY.usage.bucketEvery(formatMs(selected.bucketMs))}
+        padded
+      >
         {usage.isPending ? (
-          <Loading label="Loading usage" />
+          <Loading label={COPY.state.loadingUsage} />
         ) : usage.isError ? (
           <ErrorPanel error={usage.error} onRetry={() => void usage.refetch()} />
         ) : summary === undefined ? (
-          <p className="muted">No usage data.</p>
+          <p className="muted">{COPY.usage.empty}</p>
         ) : (
           <>
             <div className="stat-grid">
-              <Stat label="Requests" value={formatInt(summary.requests)} />
-              <Stat label="Errors" value={formatInt(summary.errors)} tone={summary.errors > 0 ? "warn" : "good"} />
-              <Stat label="Prompt tokens" value={formatCompact(summary.prompt_tokens)} />
-              <Stat label="Completion tokens" value={formatCompact(summary.completion_tokens)} />
-              <Stat label="Cached tokens" value={formatCompact(summary.cached_tokens)} />
-              <Stat label="Reasoning tokens" value={formatCompact(summary.reasoning_tokens)} />
-              <Stat label="Cost" value={formatCost(summary.cost)} />
-              <Stat label="Avg latency" value={formatMs(summary.avg_latency_ms)} />
-              <Stat label="Avg TTFT" value={formatMs(summary.avg_ttft_ms)} />
+              <Stat label={COPY.metric.requests} value={formatInt(summary.requests)} />
+              <Stat
+                label={COPY.metric.errors}
+                value={formatInt(summary.errors)}
+                tone={summary.errors > 0 ? "warn" : "good"}
+              />
+              <Stat label={COPY.metric.promptTokens} value={formatCompact(summary.prompt_tokens)} />
+              <Stat label={COPY.metric.completionTokens} value={formatCompact(summary.completion_tokens)} />
+              <Stat label={COPY.metric.cachedTokens} value={formatCompact(summary.cached_tokens)} />
+              <Stat label={COPY.usage.reasoningTokens} value={formatCompact(summary.reasoning_tokens)} />
+              <Stat label={COPY.metric.cost} value={formatCost(summary.cost)} />
+              <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
+              <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} />
             </div>
-            <h3 className="section-title">Requests over time</h3>
-            <BarChart points={usage.data?.series ?? []} label={`Requests per bucket over the last ${selected.label}`} />
+            <h3 className="section-title">{COPY.usage.requestsOverTime}</h3>
+            <BarChart points={usage.data?.series ?? []} label={COPY.usage.chartLabel(selected.label)} />
           </>
         )}
       </Card>
 
       <Card
-        title="Breakdown"
+        title={COPY.usage.breakdown}
         actions={
           <div className="tabs" role="tablist">
             {(["model", "provider", "key"] as Tab[]).map((id) => (
@@ -129,33 +142,33 @@ export function UsageView() {
         padded
       >
         {summary === undefined ? (
-          <p className="muted">No usage data.</p>
+          <p className="muted">{COPY.usage.empty}</p>
         ) : tab === "model" ? (
-          <AggregateTable rows={summary.by_model} empty="No model traffic in this window." />
+          <AggregateTable rows={summary.by_model} empty={COPY.usage.noModelTraffic} />
         ) : tab === "provider" ? (
-          <AggregateTable rows={summary.by_provider} empty="No provider traffic in this window." />
+          <AggregateTable rows={summary.by_provider} empty={COPY.dashboard.noProviderTraffic} />
         ) : (
-          <AggregateTable rows={summary.by_key} empty="No key traffic in this window." />
+          <AggregateTable rows={summary.by_key} empty={COPY.usage.noKeyTraffic} />
         )}
       </Card>
 
       <Card
-        title="Request log"
-        subtitle="Newest first, filtered by the controls below"
+        title={COPY.usage.log}
+        subtitle={COPY.usage.logHint}
         actions={
           <button type="button" className="btn btn-small" onClick={() => void log.refetch()}>
-            Refresh
+            {COPY.action.refresh}
           </button>
         }
       >
         <div className="filter-bar">
-          <Field label="Model">
+          <Field label={COPY.column.model}>
             <select
               className="input"
               value={model}
               onChange={(event) => applyFilter(() => setModel(event.currentTarget.value))}
             >
-              <option value="">all models</option>
+              <option value="">{COPY.usage.allModels}</option>
               {modelOptions.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -164,13 +177,13 @@ export function UsageView() {
             </select>
           </Field>
 
-          <Field label="Provider">
+          <Field label={COPY.column.provider}>
             <select
               className="input"
               value={providerId}
               onChange={(event) => applyFilter(() => setProviderId(event.currentTarget.value))}
             >
-              <option value="">all providers</option>
+              <option value="">{COPY.usage.allProviders}</option>
               {(config.data?.providers ?? []).map((detail) => (
                 <option key={detail.provider.id} value={String(detail.provider.id)}>
                   {detail.provider.name}
@@ -182,7 +195,7 @@ export function UsageView() {
           <div className="filter-toggle">
             <Toggle
               checked={errorsOnly}
-              label="Errors only"
+              label={COPY.usage.onlyErrors}
               onChange={(next) => applyFilter(() => setErrorsOnly(next))}
             />
           </div>
@@ -196,27 +209,27 @@ export function UsageView() {
               <table>
                 <thead>
                   <tr>
-                    <th>Time</th>
-                    <th>Request</th>
-                    <th>Endpoint</th>
-                    <th>Model</th>
-                    <th>Provider</th>
-                    <th className="num">Prompt</th>
-                    <th className="num">Completion</th>
-                    <th className="num">Cached</th>
-                    <th className="num">Cost</th>
-                    <th className="num">Attempts</th>
-                    <th>Status</th>
-                    <th className="num">Latency</th>
-                    <th className="num">TTFT</th>
-                    <th>Key</th>
+                    <th>{COPY.column.time}</th>
+                    <th>{COPY.usage.requestId}</th>
+                    <th>{COPY.column.endpoint}</th>
+                    <th>{COPY.column.model}</th>
+                    <th>{COPY.column.provider}</th>
+                    <th className="num">{COPY.column.promptTokens}</th>
+                    <th className="num">{COPY.column.completionTokens}</th>
+                    <th className="num">{COPY.column.cachedTokens}</th>
+                    <th className="num">{COPY.column.cost}</th>
+                    <th className="num">{COPY.column.attempts}</th>
+                    <th>{COPY.column.status}</th>
+                    <th className="num">{COPY.column.latency}</th>
+                    <th className="num">{COPY.usage.ttft}</th>
+                    <th>{COPY.column.clientKey}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
                       <td className="empty" colSpan={14}>
-                        {log.isPending ? "Loading…" : "No requests match these filters."}
+                        {log.isPending ? COPY.state.loading : COPY.usage.noLog}
                       </td>
                     </tr>
                   ) : null}
@@ -227,7 +240,7 @@ export function UsageView() {
                 {log.data !== undefined ? (
                   <tfoot>
                     <tr>
-                      <td colSpan={5}>Filtered totals · {formatInt(log.data.total)} rows</td>
+                      <td colSpan={5}>{COPY.usage.filteredTotals(formatInt(log.data.total))}</td>
                       <td className="num">{formatCompact(log.data.totals.prompt_tokens)}</td>
                       <td className="num">{formatCompact(log.data.totals.completion_tokens)}</td>
                       <td className="num">{formatCompact(log.data.totals.cached_tokens)}</td>

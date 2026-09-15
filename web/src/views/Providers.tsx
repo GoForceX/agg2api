@@ -24,12 +24,6 @@ import {
   Toggle
 } from "../components/ui.tsx"
 
-const KIND_LABEL: Record<ProviderKind, string> = {
-  "openai-chat": "openai-chat",
-  "openai-responses": "openai-responses",
-  workbuddy2api: "workbuddy2api"
-}
-
 const KIND_TONE: Record<ProviderKind, "info" | "neutral" | "warn"> = {
   "openai-chat": "info",
   "openai-responses": "neutral",
@@ -61,7 +55,12 @@ export function ProvidersView() {
       setNotice(
         result.error !== null
           ? `${result.error}`
-          : `Provider ${id}: +${result.created.length} created, -${result.removed.length} removed, ${result.models.length} total.`
+          : COPY.providers.discoverProviderResult(
+              id,
+              result.created.length,
+              result.removed.length,
+              result.models.length
+            )
       )
       await refresh()
     },
@@ -74,8 +73,12 @@ export function ProvidersView() {
       const failed = result.results.filter((entry) => entry.error !== null)
       setNotice(
         failed.length === 0
-          ? `Discovered across ${result.results.length} providers.`
-          : `${result.results.length} providers, ${failed.length} failed: ${failed.map((entry) => entry.error).join("; ")}`
+          ? COPY.providers.discoverAllOk(result.results.length)
+          : COPY.providers.discoverAllFailed(
+              result.results.length,
+              failed.length,
+              failed.map((entry) => entry.error).join("; ")
+            )
       )
       await refresh()
     },
@@ -86,7 +89,7 @@ export function ProvidersView() {
     mutationFn: (id: number) => api.providerCredits(id),
     onSuccess: (result, id) => {
       setCreditsOverride((current) => ({ ...current, [id]: result.credits }))
-      if (result.error !== null) setNotice(`Credits: ${result.error}`)
+      if (result.error !== null) setNotice(COPY.providers.creditsFailed(result.error))
       void refresh()
     },
     onError: (error) => setNotice(errorMessage(error))
@@ -104,7 +107,7 @@ export function ProvidersView() {
     onError: (error) => setNotice(errorMessage(error))
   })
 
-  if (config.isPending) return <Loading label="Loading providers" />
+  if (config.isPending) return <Loading label={COPY.state.loadingProviders} />
   if (config.isError) return <ErrorPanel error={config.error} onRetry={() => void config.refetch()} />
 
   const settings = config.data.settings
@@ -114,7 +117,7 @@ export function ProvidersView() {
   return (
     <div className="stack">
       <div className="view-head">
-        <h1>Providers</h1>
+        <h1>{COPY.providers.title}</h1>
         <div className="row-actions">
           <button
             type="button"
@@ -122,10 +125,10 @@ export function ProvidersView() {
             disabled={discoverAll.isPending}
             onClick={() => discoverAll.mutate()}
           >
-            {discoverAll.isPending ? "Discovering…" : "Discover all"}
+            {discoverAll.isPending ? COPY.providers.discoveringAll : COPY.providers.discoverAll}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-            New provider
+            {COPY.providers.add}
           </button>
         </div>
       </div>
@@ -137,37 +140,48 @@ export function ProvidersView() {
           tone={testResult.result.ok ? "good" : "bad"}
           message={
             testResult.result.ok
-              ? `Test ok · ${testResult.result.model} · ${formatMs(testResult.result.latency_ms)} · “${testResult.result.reply}”`
-              : `Test failed · ${testResult.result.model}: ${testResult.result.error ?? "unknown error"}`
+              ? COPY.providers.testResultOk(
+                  testResult.result.model,
+                  formatMs(testResult.result.latency_ms),
+                  testResult.result.reply
+                )
+              : COPY.providers.testResultFailed(
+                  testResult.result.model,
+                  testResult.result.error ?? COPY.state.unknown
+                )
           }
           onDismiss={() => setTestResult(null)}
         />
       ) : null}
 
       <Card
-        title={`${config.data.providers.length} providers`}
-        subtitle={`Default strategy: ${settings.default_strategy} · request timeout ${formatMs(settings.request_timeout_ms)} · discovery every ${settings.discovery_interval_s}s`}
+        title={COPY.providers.listTitle(config.data.providers.length)}
+        subtitle={COPY.providers.settingsLine(
+          COPY.strategies[settings.default_strategy],
+          formatMs(settings.request_timeout_ms),
+          String(settings.discovery_interval_s)
+        )}
       >
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Kind</th>
-                <th>Base URL</th>
-                <th className="num">Priority</th>
-                <th>Enabled</th>
-                <th className="num">Models</th>
-                <th>Credits</th>
-                <th>Breaker</th>
-                <th>Actions</th>
+                <th>{COPY.column.provider}</th>
+                <th>{COPY.field.kind}</th>
+                <th>{COPY.field.baseUrl}</th>
+                <th className="num">{COPY.field.priority}</th>
+                <th>{COPY.field.enabled}</th>
+                <th className="num">{COPY.field.models}</th>
+                <th>{COPY.providers.credits}</th>
+                <th>{COPY.providers.breaker}</th>
+                <th>{COPY.providers.actions}</th>
               </tr>
             </thead>
             <tbody>
               {config.data.providers.length === 0 ? (
                 <tr>
                   <td className="empty" colSpan={9}>
-                    No providers yet. Create one to start discovering models.
+                    {COPY.providers.empty}
                   </td>
                 </tr>
               ) : null}
@@ -198,7 +212,7 @@ export function ProvidersView() {
 
       {creating ? (
         <ProviderForm
-          title="New provider"
+          title={COPY.providers.add}
           draft={EMPTY_PROVIDER}
           maskedKey={null}
           onClose={() => setCreating(false)}
@@ -211,7 +225,7 @@ export function ProvidersView() {
 
       {editing !== null ? (
         <ProviderForm
-          title={`Edit ${editing.provider.name}`}
+          title={COPY.providers.editTitle(editing.provider.name)}
           draft={providerToDraft(editing.provider)}
           maskedKey={editing.provider.api_key}
           providerId={editing.provider.id}
@@ -262,16 +276,22 @@ function ProviderRow({
         <td>
           <div className="cell-title">{provider.name}</div>
           <div className="muted small">
-            {detail.routed_models.length > 0 ? `${detail.routed_models.length} routed models` : "not routed"}
+            {detail.routed_models.length > 0
+              ? COPY.providers.routedCount(detail.routed_models.length)
+              : COPY.providers.notRouted}
           </div>
         </td>
         <td>
-          <Badge tone={KIND_TONE[provider.kind]}>{KIND_LABEL[provider.kind]}</Badge>
+          <Badge tone={KIND_TONE[provider.kind]}>{COPY.kinds[provider.kind]}</Badge>
         </td>
         <td className="mono small">{provider.base_url}</td>
         <td className="num">{formatInt(provider.priority)}</td>
         <td>
-          <Toggle checked={provider.enabled} ariaLabel={`Enable ${provider.name}`} onChange={onToggleEnabled} />
+          <Toggle
+            checked={provider.enabled}
+            ariaLabel={COPY.providers.enableToggle(provider.name)}
+            onChange={onToggleEnabled}
+          />
         </td>
         <td className="num">{formatInt(detail.models.length)}</td>
         <td>
@@ -280,8 +300,10 @@ function ProviderRow({
               <span>{credits === null ? "—" : formatCompact(credits.total)}</span>
               {credits !== null ? (
                 <span className="muted small">
-                  {formatInt(credits.healthy)} healthy
-                  {credits.fetched_at > 0 ? ` · ${formatDateTime(credits.fetched_at)}` : ""}
+                  {COPY.providers.healthyAccounts(credits.healthy)}
+                  {credits.fetched_at > 0
+                    ? ` · ${COPY.providers.creditsFetched(formatDateTime(credits.fetched_at))}`
+                    : ""}
                 </span>
               ) : null}
               {credits?.error !== null && credits !== null ? (
@@ -289,15 +311,15 @@ function ProviderRow({
               ) : null}
               <div className="row-actions">
                 <button type="button" className="btn btn-small" disabled={busy} onClick={onCredits}>
-                  Refresh credits
+                  {COPY.providers.refreshCredits}
                 </button>
                 <button type="button" className="btn btn-small" onClick={onToggleExpand}>
-                  {isExpanded ? "Hide accounts" : "Accounts"}
+                  {isExpanded ? COPY.providers.hideAccounts : COPY.providers.accounts}
                 </button>
               </div>
             </div>
           ) : (
-            <span className="muted small">n/a</span>
+            <span className="muted small">{COPY.state.none}</span>
           )}
         </td>
         <td>
@@ -306,7 +328,9 @@ function ProviderRow({
               {breakerLabel(status.open_until, status.consecutive_failures)}
             </Badge>
             <span className="muted small">
-              {status.last_success_at > 0 ? `ok ${formatDateTime(status.last_success_at)}` : "no success yet"}
+              {status.last_success_at > 0
+                ? COPY.providers.lastSuccessAt(formatDateTime(status.last_success_at))
+                : COPY.providers.noSuccess}
             </span>
             {status.last_error !== null ? <span className="small danger">{status.last_error}</span> : null}
           </div>
@@ -314,15 +338,19 @@ function ProviderRow({
         <td>
           <div className="row-actions">
             <button type="button" className="btn btn-small" onClick={onEdit}>
-              Edit
+              {COPY.action.edit}
             </button>
             <button type="button" className="btn btn-small" disabled={busy} onClick={onTest}>
-              Test
+              {COPY.action.test}
             </button>
             <button type="button" className="btn btn-small" disabled={busy} onClick={onDiscover}>
-              Discover
+              {COPY.action.discover}
             </button>
-            <ConfirmButton onConfirm={onDelete} label="Delete" confirmLabel="Confirm delete" />
+            <ConfirmButton
+              onConfirm={onDelete}
+              label={COPY.action.delete}
+              confirmLabel={COPY.action.confirmDelete}
+            />
           </div>
         </td>
       </tr>
@@ -330,20 +358,20 @@ function ProviderRow({
         <tr className="detail-row">
           <td colSpan={9}>
             {credits === null ? (
-              <p className="muted padded">No credit snapshot yet — press “Refresh credits”.</p>
+              <p className="muted padded">{COPY.providers.noCreditSnapshot}</p>
             ) : (
               <div className="detail-panel">
                 <div className="stat-grid">
                   <div className="stat">
-                    <span className="stat-label">Total</span>
+                    <span className="stat-label">{COPY.providers.creditsTotal}</span>
                     <span className="stat-value">{formatCompact(credits.total)}</span>
                   </div>
                   <div className="stat">
-                    <span className="stat-label">Healthy accounts</span>
+                    <span className="stat-label">{COPY.providers.healthyAccountsLabel}</span>
                     <span className="stat-value">{formatInt(credits.healthy)}</span>
                   </div>
                   <div className="stat">
-                    <span className="stat-label">Accounts</span>
+                    <span className="stat-label">{COPY.providers.accounts}</span>
                     <span className="stat-value">{formatInt(credits.accounts.length)}</span>
                   </div>
                 </div>
@@ -351,18 +379,18 @@ function ProviderRow({
                   <table>
                     <thead>
                       <tr>
-                        <th>UID</th>
-                        <th>Nickname</th>
-                        <th>Realm</th>
-                        <th className="num">Credits</th>
-                        <th>State</th>
+                        <th>{COPY.providers.accountColumns.uid}</th>
+                        <th>{COPY.providers.accountColumns.nickname}</th>
+                        <th>{COPY.providers.accountColumns.realm}</th>
+                        <th className="num">{COPY.providers.accountColumns.credits}</th>
+                        <th>{COPY.providers.accountColumns.state}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {credits.accounts.length === 0 ? (
                         <tr>
                           <td className="empty" colSpan={5}>
-                            The upstream reported no accounts.
+                            {COPY.providers.noAccounts}
                           </td>
                         </tr>
                       ) : null}
@@ -374,11 +402,11 @@ function ProviderRow({
                           <td className="num">{formatCompact(account.credits)}</td>
                           <td>
                             {account.disabled === true ? (
-                              <Badge tone="bad">{account.disabled_reason ?? "disabled"}</Badge>
+                              <Badge tone="bad">{account.disabled_reason ?? COPY.providers.disabled}</Badge>
                             ) : account.cooling === true ? (
-                              <Badge tone="warn">cooling</Badge>
+                              <Badge tone="warn">{COPY.providers.cooling}</Badge>
                             ) : (
-                              <Badge tone="good">ready</Badge>
+                              <Badge tone="good">{COPY.state.ok}</Badge>
                             )}
                           </td>
                         </tr>
@@ -420,10 +448,10 @@ function ProviderForm({
   const save = useMutation({
     mutationFn: async () => {
       const input = draftToInput(form, keyTouched)
-      if (input.name.length === 0) throw new Error("Name is required")
-      if (input.base_url.length === 0) throw new Error("Base URL is required")
+      if (input.name.length === 0) throw new Error(COPY.validation.nameRequired)
+      if (input.base_url.length === 0) throw new Error(COPY.validation.baseUrlRequired)
       if (providerId === undefined && (input.api_key === undefined || input.api_key.length === 0)) {
-        throw new Error("API key is required for a new provider")
+        throw new Error(COPY.providers.apiKeyRequired)
       }
       return providerId === undefined ? api.createProvider(input) : api.updateProvider(providerId, input)
     },
@@ -439,10 +467,15 @@ function ProviderForm({
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {COPY.action.cancel}
           </button>
-          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : providerId === undefined ? "Create" : "Save"}
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? COPY.action.saving : providerId === undefined ? COPY.action.create : COPY.action.save}
           </button>
         </>
       }
@@ -450,16 +483,16 @@ function ProviderForm({
       {error !== null ? <Banner tone="bad" message={error} onDismiss={() => setError(null)} /> : null}
 
       <div className="form-grid">
-        <Field label="Name">
+        <Field label={COPY.field.name}>
           <input
             className="input"
             value={form.name}
-            placeholder="my-provider"
+            placeholder={COPY.providers.namePlaceholder}
             onChange={(event) => patch({ name: event.currentTarget.value })}
           />
         </Field>
 
-        <Field label="Kind" hint="Upstream protocol family">
+        <Field label={COPY.field.kind} hint={COPY.providers.kindHint}>
           <select
             className="input"
             value={form.kind}
@@ -467,13 +500,13 @@ function ProviderForm({
           >
             {KINDS.map((kind) => (
               <option key={kind} value={kind}>
-                {KIND_LABEL[kind]}
+                {COPY.kinds[kind]}
               </option>
             ))}
           </select>
         </Field>
 
-        <Field label="Base URL" hint="Origin without a trailing slash">
+        <Field label={COPY.field.baseUrl} hint={COPY.providers.baseUrlHint}>
           <input
             className="input mono"
             value={form.base_url}
@@ -484,11 +517,11 @@ function ProviderForm({
         </Field>
 
         <Field
-          label="API key"
+          label={COPY.field.apiKey}
           hint={
             maskedKey === null || maskedKey.length === 0
-              ? "Sent as the provider credential; required on create."
-              : "Leave untouched to keep the stored key; typing replaces it."
+              ? COPY.providers.apiKeyNewHint
+              : COPY.providers.apiKeyHint
           }
         >
           <input
@@ -505,7 +538,7 @@ function ProviderForm({
           />
         </Field>
 
-        <Field label="Priority" hint="Higher wins under priority; the weight under weighted">
+        <Field label={COPY.field.priority} hint={COPY.providers.priorityHint}>
           <input
             className="input"
             type="number"
@@ -514,7 +547,7 @@ function ProviderForm({
           />
         </Field>
 
-        <Field label="Max retries" hint="Retryable attempts inside this provider before failover">
+        <Field label={COPY.providers.maxRetries} hint={COPY.providers.maxRetriesHint}>
           <input
             className="input"
             type="number"
@@ -524,7 +557,7 @@ function ProviderForm({
           />
         </Field>
 
-        <Field label="Input price" hint="Per 1M prompt tokens; blank = unpriced">
+        <Field label={COPY.field.inputPrice} hint={COPY.providers.priceHint}>
           <input
             className="input"
             value={form.input_price}
@@ -533,7 +566,7 @@ function ProviderForm({
           />
         </Field>
 
-        <Field label="Output price" hint="Per 1M completion tokens; blank = unpriced">
+        <Field label={COPY.field.outputPrice} hint={COPY.providers.priceHint}>
           <input
             className="input"
             value={form.output_price}
@@ -542,7 +575,7 @@ function ProviderForm({
           />
         </Field>
 
-        <Field label="Currency">
+        <Field label={COPY.field.currency}>
           <input
             className="input"
             value={form.currency}
@@ -552,48 +585,52 @@ function ProviderForm({
         </Field>
 
         <div className="form-span">
-          <Toggle checked={form.enabled} label="Enabled" onChange={(enabled) => patch({ enabled })} />
+          <Toggle
+            checked={form.enabled}
+            label={COPY.field.enabled}
+            onChange={(enabled) => patch({ enabled })}
+          />
         </div>
 
         <div className="form-span">
-          <span className="field-label">Headers</span>
+          <span className="field-label">{COPY.field.headers}</span>
           <PairEditor
             entries={form.headers}
             onChange={(headers) => patch({ headers })}
-            keyPlaceholder="header name"
-            valuePlaceholder="value"
-            emptyHint="No extra headers. Add one for upstream version pins or auth quirks."
+            keyPlaceholder={COPY.providers.headerNamePlaceholder}
+            valuePlaceholder={COPY.providers.headerValuePlaceholder}
+            emptyHint={COPY.providers.headersHint}
           />
         </div>
 
         <div className="form-span">
-          <span className="field-label">Model rename</span>
+          <span className="field-label">{COPY.providers.modelRename}</span>
           <PairEditor
             entries={form.model_rename}
             onChange={(model_rename) => patch({ model_rename })}
-            keyPlaceholder="upstream model id"
-            valuePlaceholder="public model id"
-            emptyHint="No renames. Left side is the upstream id, right side the public id."
+            keyPlaceholder={COPY.field.upstreamModel}
+            valuePlaceholder={COPY.field.publicModel}
+            emptyHint={COPY.providers.modelRenameHint}
           />
         </div>
 
-        <Field label="Model allowlist" hint="One glob per line; empty allows everything">
+        <Field label={COPY.field.allowedModels} hint={COPY.providers.modelAllowHint}>
           <textarea
             className="input mono"
             rows={4}
             value={form.model_allow}
-            placeholder={"gpt-*\no1-*"}
+            placeholder={COPY.providers.modelAllowPlaceholder}
             spellCheck={false}
             onChange={(event) => patch({ model_allow: event.currentTarget.value })}
           />
         </Field>
 
-        <Field label="Model denylist" hint="One glob per line; applied after the allowlist">
+        <Field label={COPY.providers.modelDeny} hint={COPY.providers.modelDenyHint}>
           <textarea
             className="input mono"
             rows={4}
             value={form.model_deny}
-            placeholder={"*-preview\n*-audio-*"}
+            placeholder={COPY.providers.modelDenyPlaceholder}
             spellCheck={false}
             onChange={(event) => patch({ model_deny: event.currentTarget.value })}
           />
@@ -601,8 +638,7 @@ function ProviderForm({
       </div>
 
       <p className="muted small">
-        Prices are per 1M tokens; usage cost totals are reported in{" "}
-        {form.currency.trim().length > 0 ? form.currency.trim() : "USD"}.
+        {COPY.providers.priceNote(form.currency.trim().length > 0 ? form.currency.trim() : "USD")}
       </p>
     </Modal>
   )

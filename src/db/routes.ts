@@ -124,19 +124,27 @@ export const createRoute = (
   sql: SqlClient.SqlClient,
   input: RouteInput
 ): Effect.Effect<Route, SqlError> =>
+  // One transaction: the upsert and the target replacement are a single logical write,
+  // and `replaceTargets` deletes before it inserts. Without this, a failure part-way
+  // through leaves the route committed with its targets already deleted — an enabled
+  // route that serves nothing while reporting a 500.
   Effect.gen(function* () {
     const ts = now()
-    yield* sql`
-      INSERT INTO routes (public_model, strategy, enabled, display_name, created_at, updated_at)
-      VALUES (${input.public_model}, ${input.strategy ?? null}, ${bool(input.enabled ?? true)},
-              ${input.display_name ?? null}, ${ts}, ${ts})
-      ON CONFLICT (public_model) DO UPDATE SET
-        strategy = excluded.strategy,
-        enabled = excluded.enabled,
-        display_name = excluded.display_name,
-        updated_at = excluded.updated_at
-    `
-    yield* replaceTargets(sql, input.public_model, input.targets)
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql`
+          INSERT INTO routes (public_model, strategy, enabled, display_name, created_at, updated_at)
+          VALUES (${input.public_model}, ${input.strategy ?? null}, ${bool(input.enabled ?? true)},
+                  ${input.display_name ?? null}, ${ts}, ${ts})
+          ON CONFLICT (public_model) DO UPDATE SET
+            strategy = excluded.strategy,
+            enabled = excluded.enabled,
+            display_name = excluded.display_name,
+            updated_at = excluded.updated_at
+        `
+        yield* replaceTargets(sql, input.public_model, input.targets)
+      })
+    )
     const created = yield* getRoute(sql, input.public_model)
     return yield* Option.match(created, {
       onNone: () => Effect.die(new Error("route vanished immediately after upsert")),
@@ -159,15 +167,22 @@ export const updateRoute = (
     if (patch.display_name !== undefined) {
       assignments.push(["display_name", patch.display_name] as const)
     }
-    if (assignments.length > 0) {
-      yield* sql.unsafe(
-        `UPDATE routes SET ${assignments.map(([column]) => `${column} = ?`).join(", ")}, updated_at = ? WHERE public_model = ?`,
-        [...assignments.map(([, value]) => value), now(), publicModel]
-      )
-    }
-    if (patch.targets !== undefined) {
-      yield* replaceTargets(sql, publicModel, patch.targets)
-    }
+    // Field updates and target replacement commit together for the same reason as in
+    // `createRoute`: a partial failure would otherwise leave the row changed with no
+    // targets, or with the new fields but the old targets.
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        if (assignments.length > 0) {
+          yield* sql.unsafe(
+            `UPDATE routes SET ${assignments.map(([column]) => `${column} = ?`).join(", ")}, updated_at = ? WHERE public_model = ?`,
+            [...assignments.map(([, value]) => value), now(), publicModel]
+          )
+        }
+        if (patch.targets !== undefined) {
+          yield* replaceTargets(sql, publicModel, patch.targets)
+        }
+      })
+    )
     return yield* getRoute(sql, publicModel)
   })
 
