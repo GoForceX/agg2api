@@ -191,9 +191,11 @@ const main = async () => {
     const third = await turn(convo)
     report.push(`request 3 (immediate)            -> ${third.served}, attempts=${await lastAttempts()}  [${await breakers()}]`)
 
-    // --- request 4, well after the cooldown expires --------------------
-    // The first failure opened a 5s breaker; wait past it so the pinned provider is
-    // eligible again and we can see whether the pin still points at it.
+    // --- request 4, well after any cooldown would expire -----------------
+    // Past the base cooldown, so if the pinned provider had been taken out of rotation
+    // it would be eligible again by now and we could see whether the pin still points
+    // at it. With the default threshold of 3 and single failures per turn, it never
+    // left rotation — hence `alpha:ok` throughout.
     await Bun.sleep(6_000)
     convo.push({ role: "assistant", content: third.served })
     convo.push({ role: "user", content: "fourth" })

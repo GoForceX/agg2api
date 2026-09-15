@@ -377,7 +377,16 @@ export const COPY = {
     disabledSuffix: "（已停用）",
     notDiscovered: (model: string) => `${model}（未发现）`,
     addTarget: "添加目标上游",
-    removeTarget: "移除目标上游"
+    removeTarget: "移除目标上游",
+    /** Shown beside the chosen model so an operator knows what it accepts. */
+    capabilitiesUnknown: "能力未知",
+    /** Provenance matters: a provider's own claim and a catalogue lookup differ in trust. */
+    sourceUpstream: "上游自报",
+    sourceModelsDev: "models.dev",
+    sourceNearest: "models.dev 推断",
+    capabilityTools: "工具",
+    capabilityReasoning: "推理",
+    capabilityStructured: "结构化输出"
   },
 
   keys: {

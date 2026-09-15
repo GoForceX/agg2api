@@ -6,6 +6,7 @@
  * UI can never drift from what the server stores.
  */
 import * as Schema from "effect/Schema"
+import { ModelCapabilities } from "./models/capabilities.ts"
 
 /** Upstream protocol family. */
 export const ProviderKind = Schema.Literal("openai-chat", "openai-responses", "workbuddy2api")
@@ -70,6 +71,26 @@ export const ProviderInput = Schema.Struct({
 })
 export type ProviderInput = typeof ProviderInput.Type
 
+/**
+ * One provider attempt, as recorded for the usage log and the admin UI.
+ *
+ * Lives here rather than beside the executor because the failure trail travels on
+ * `ProviderError`: a request that exhausted every candidate still has to report how
+ * many providers it tried and which one failed last, and the error is what reaches
+ * the handler that writes the usage row.
+ */
+export const ProviderAttempt = Schema.Struct({
+  provider_id: Schema.Number,
+  provider_name: Schema.String,
+  provider_kind: ProviderKind,
+  upstream_model: Schema.String,
+  status: Schema.Number,
+  error_kind: Schema.NullOr(Schema.String),
+  error_message: Schema.NullOr(Schema.String),
+  latency_ms: Schema.Number
+})
+export type ProviderAttempt = typeof ProviderAttempt.Type
+
 /** A model discovered on a provider. */
 export const DiscoveredModel = Schema.Struct({
   provider_id: Schema.Number,
@@ -77,7 +98,14 @@ export const DiscoveredModel = Schema.Struct({
   public_id: Schema.String,
   context_length: Schema.NullOr(Schema.Number),
   max_output_tokens: Schema.NullOr(Schema.Number),
-  supports_images: Schema.Boolean,
+  /**
+   * What the model accepts and emits. `null` when nothing could be established — a
+   * provider that does not report it and a `models.dev` id that matched nothing.
+   *
+   * Deliberately not a boolean: "we do not know" and "no images" are different answers,
+   * and collapsing them told every client that an unrecognised model was text-only.
+   */
+  capabilities: Schema.NullOr(ModelCapabilities),
   owned_by: Schema.NullOr(Schema.String),
   last_seen: Schema.Number
 })

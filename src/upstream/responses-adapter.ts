@@ -42,7 +42,6 @@ const toUpstreamModel = (entry: Record<string, unknown>): UpstreamModel | null =
     id,
     context_length: asNumber(pick("context_length")),
     max_output_tokens: asNumber(pick("max_output_tokens")),
-    supports_images: asBoolean(pick("supports_images")) ?? false,
     owned_by: asString(pick("owned_by")),
     // Kept verbatim so provider-specific fields still reach the admin UI.
     raw: entry

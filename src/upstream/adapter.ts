@@ -63,9 +63,14 @@ export interface UpstreamModel {
   readonly id: string
   readonly context_length: number | null
   readonly max_output_tokens: number | null
-  readonly supports_images: boolean
   readonly owned_by: string | null
-  /** Provider payload, kept for display in the admin UI. */
+  /**
+   * Provider payload, kept verbatim.
+   *
+   * Load-bearing beyond display: capability inference reads the upstream's own
+   * modality fields out of here, and upstreams disagree so much about where those
+   * live that parsing in one place beats one parser per adapter.
+   */
   readonly raw: unknown
 }
 

@@ -572,7 +572,10 @@ const models = Effect.gen(function* () {
       display_name: entry.display_name,
       context_length: metadata?.context_length ?? null,
       max_output_tokens: metadata?.max_output_tokens ?? null,
-      supports_images: metadata?.supports_images ?? false,
+      capabilities: metadata?.capabilities ?? null,
+      // Derived, not stored: older clients read this boolean, and it is a projection of
+      // the capabilities above rather than a second source of truth.
+      supports_images: metadata?.capabilities?.input.includes("image") ?? false,
       providers: [...entry.providers]
     })
   }
@@ -603,7 +606,8 @@ const modelCard = Effect.gen(function* () {
     display_name: null,
     context_length: metadata?.context_length ?? null,
     max_output_tokens: metadata?.max_output_tokens ?? null,
-    supports_images: metadata?.supports_images ?? false
+    capabilities: metadata?.capabilities ?? null,
+    supports_images: metadata?.capabilities?.input.includes("image") ?? false
   }
   return card
 })
@@ -667,17 +671,18 @@ export const guard = <A, R>(
             status: rendered.status,
             error_kind: rendered.code,
             error_message: rendered.message,
-            // An attempt log is not available here; a ProviderError at least names the
-            // upstream it came from, which is what makes the provider breakdown
-            // actionable. A routing failure has no provider to attribute at all.
-            attempts: [],
+            // The executor attaches the trail of every candidate it tried, so a request
+            // that exhausted three providers is logged as three attempts rather than
+            // one — which is what makes "this route is mostly failing over" visible.
+            // A routing failure never reached a provider, so it has no trail at all.
+            attempts: error._tag === "ProviderError" ? error.attempts : [],
             attribution:
               error._tag === "ProviderError"
                 ? {
                     provider_id: error.provider_id,
                     provider_name: error.provider_name,
-                    provider_kind: null,
-                    upstream_model: null
+                    provider_kind: error.attempts.at(-1)?.provider_kind ?? null,
+                    upstream_model: error.attempts.at(-1)?.upstream_model ?? null
                   }
                 : null
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql))

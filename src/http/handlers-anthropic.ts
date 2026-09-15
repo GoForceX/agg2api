@@ -220,6 +220,7 @@ const anthropicModels = Effect.gen(function* () {
     // The gateway does not track per-model release dates, so the epoch is stated rather
     // than invented. Clients only render it.
     created_at: new Date(0).toISOString(),
+    capabilities: metadata?.capabilities ?? null,
     max_input_tokens: metadata?.context_length ?? null,
     max_tokens: metadata?.max_output_tokens ?? null
   }))
@@ -252,6 +253,7 @@ const anthropicModel = Effect.gen(function* () {
     id,
     display_name: found.entry.display_name ?? id,
     created_at: new Date(0).toISOString(),
+    capabilities: found.metadata?.capabilities ?? null,
     max_input_tokens: found.metadata?.context_length ?? null,
     max_tokens: found.metadata?.max_output_tokens ?? null
   }

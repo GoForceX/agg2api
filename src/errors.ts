@@ -10,6 +10,7 @@
  *   in OpenAI's error envelope; never retried.
  */
 import * as Schema from "effect/Schema"
+import { ProviderAttempt } from "./domain.ts"
 
 export const ProviderErrorKind = Schema.Literal(
   /** 401/403 — the provider's credential is bad. Never retried. */
@@ -45,7 +46,19 @@ export class ProviderError extends Schema.TaggedError<ProviderError>()("Provider
   /** Provider-supplied backoff hint, ms. */
   retry_after_ms: Schema.NullOr(Schema.Number),
   /** Truncated upstream body, for the admin UI and logs. */
-  body: Schema.NullOr(Schema.String)
+  body: Schema.NullOr(Schema.String),
+  /**
+   * Every provider attempt made before this error was raised, oldest first.
+   *
+   * Carried on the error so the failure trail survives the executor's failure channel.
+   * Without it a request that failed over across three providers is logged as one
+   * attempt, which makes a route that is mostly failing over look healthy.
+   *
+   * Defaulted rather than required: an error raised before any attempt was made — a
+   * probe, or a transport failure during setup — genuinely has no trail, and forcing
+   * every construction site to spell out `[]` would add noise without adding meaning.
+   */
+  attempts: Schema.optionalWith(Schema.Array(ProviderAttempt), { default: () => [] })
 }) {
   /** A short tag for the `error_kind` column and log correlation. */
   get label(): string {
@@ -77,6 +90,7 @@ export const providerError = (init: {
   message: string
   retry_after_ms?: number | null
   body?: string | null
+  attempts?: ReadonlyArray<ProviderAttempt>
 }): ProviderError =>
   new ProviderError({
     provider_id: init.provider_id,
@@ -91,7 +105,8 @@ export const providerError = (init: {
     body:
       init.body === undefined || init.body === null || init.body.length <= 2048
         ? (init.body ?? null)
-        : `${init.body.slice(0, 2048)}…`
+        : `${init.body.slice(0, 2048)}…`,
+    attempts: init.attempts ?? []
   })
 
 /** No provider can serve the requested model right now. */

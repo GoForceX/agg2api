@@ -66,7 +66,7 @@ const model = (upstreamId: string, publicId: string): DiscoveredModel => ({
   public_id: publicId,
   context_length: 128_000,
   max_output_tokens: 4_096,
-  supports_images: false,
+  capabilities: null,
   owned_by: "test",
   last_seen: Date.now()
 })
@@ -279,8 +279,10 @@ describe("admin.overview", () => {
           base_url: "https://b.example.com",
           api_key: "k"
         })
-        yield* recordFailure(sql, cooling.id, "boom", Date.now() + 60_000)
-        yield* recordFailure(sql, recovered.id, "boom", Date.now() - 1_000)
+        // One failure each: `threshold: 1` is what actually opens a breaker, so this
+        // states the policy rather than pre-baking the deadline.
+        yield* recordFailure(sql, cooling.id, "boom", { threshold: 1, base_ms: 60_000, max_ms: 300_000 })
+        yield* recordFailure(sql, recovered.id, "boom", { threshold: 1, base_ms: 0, max_ms: 0 })
         const overview = yield* admin.overview()
         const status = yield* getProviderStatus(sql, recovered.id)
         return { overview, status }

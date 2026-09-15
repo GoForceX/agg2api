@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api.ts"
 import { COPY } from "../lib/copy.ts"
 import { formatDateTime, formatInt } from "../lib/format.ts"
 import { useAdminConfig, useRefreshAdmin } from "../lib/queries.ts"
-import type { ProviderDetail, Route, RouteInput, RouteTarget, RoutingStrategy } from "../lib/types.ts"
+import type { ModelCapabilities, ProviderDetail, Route, RouteInput, RouteTarget, RoutingStrategy } from "../lib/types.ts"
 import { Badge, Banner, Card, ConfirmButton, ErrorPanel, Field, Loading, Modal, Toggle } from "../components/ui.tsx"
 
 type StrategyChoice = "inherit" | RoutingStrategy
@@ -397,6 +397,35 @@ function RouteForm({
   )
 }
 
+const SOURCE_LABEL: Record<ModelCapabilities["source"], string> = {
+  upstream: COPY.routes.sourceUpstream,
+  "models.dev": COPY.routes.sourceModelsDev,
+  "models.dev-nearest": COPY.routes.sourceNearest
+}
+
+/**
+ * What the selected model accepts, and where that answer came from.
+ *
+ * The source is shown rather than just the capabilities: a claim the provider made about
+ * itself and one inferred from a third-party catalogue are not equally trustworthy, and
+ * an operator deciding whether to route image traffic here needs to know which they have.
+ */
+function CapabilityHint({ capabilities }: { capabilities: ModelCapabilities | null }) {
+  if (capabilities === null) {
+    return <span className="muted small">{COPY.routes.capabilitiesUnknown}</span>
+  }
+  const tags = capabilities.input.filter((modality) => modality !== "text")
+  if (capabilities.tool_call === true) tags.push(COPY.routes.capabilityTools)
+  if (capabilities.reasoning === true) tags.push(COPY.routes.capabilityReasoning)
+  if (capabilities.structured_output === true) tags.push(COPY.routes.capabilityStructured)
+  return (
+    <span className="muted small">
+      {SOURCE_LABEL[capabilities.source]}
+      {tags.length > 0 ? ` · ${tags.join(" · ")}` : ""}
+    </span>
+  )
+}
+
 function TargetEditor({
   targets,
   providers,
@@ -459,6 +488,8 @@ function TargetEditor({
                 </option>
               ))}
             </select>
+
+            <CapabilityHint capabilities={models.find((model) => model.upstream_id === target.upstream_model)?.capabilities ?? null} />
 
             <input
               className="input"

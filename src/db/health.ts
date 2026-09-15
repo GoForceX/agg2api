@@ -83,28 +83,77 @@ export const recordSuccess = (
       last_latency_ms = excluded.last_latency_ms
   `)
 
+/** Breaker cooldown policy, as configured. `threshold <= 0` disables the breaker. */
+export interface BreakerPolicy {
+  readonly threshold: number
+  readonly base_ms: number
+  readonly max_ms: number
+}
+
 /**
- * Record a failed call and open the breaker until `openUntil`.
+ * How long a provider stays out of rotation after its `consecutiveFailures`-th
+ * failure, or `0` to leave the breaker closed.
+ *
+ * Exponential in the count so a provider that is briefly flapping recovers quickly,
+ * while one that is genuinely down is retried rarely. Capped so a provider is never
+ * permanently abandoned.
+ *
+ * The count is compared here, *after* incrementing, rather than at the point a
+ * candidate is skipped. A skip test of `open_until > now` alone treats every failure
+ * as fatal unless `open_until` is held at 0 below the threshold — and then one unlucky
+ * attempt would take a healthy provider out for the whole cooldown, which is how a
+ * single flaky call removes a provider for every caller at once.
+ */
+export const breakerDeadline = (consecutiveFailures: number, policy: BreakerPolicy): number => {
+  if (policy.threshold <= 0) return 0
+  if (consecutiveFailures < policy.threshold) return 0
+  // The exponent counts failures *past* the threshold, so the first trip waits
+  // `base_ms` rather than `base_ms * 2^threshold`.
+  const exponent = Math.min(consecutiveFailures - policy.threshold, 16)
+  return now() + Math.min(policy.max_ms, policy.base_ms * 2 ** exponent)
+}
+
+/**
+ * Record a failed call, opening the breaker once the policy's threshold is reached.
  *
  * The previous `last_error`/`last_error_at` are always refreshed, including on a
- * failure that leaves the breaker closed, so the UI can show the most recent
- * reason a provider degraded even when it has not been taken out of rotation.
+ * failure that leaves the breaker closed, so the UI can show the most recent reason a
+ * provider degraded even when it has not been taken out of rotation.
+ *
+ * The failure count is read and written here, in one place, because the deadline
+ * depends on the incremented count: computing it from a caller-supplied count would
+ * let two concurrent failures against one provider both observe the old value and
+ * both decline to trip.
  */
 export const recordFailure = (
   sql: SqlClient.SqlClient,
   providerId: number,
   error: string,
-  openUntil: number
+  policy: BreakerPolicy
 ): Effect.Effect<void, SqlError> =>
-  Effect.asVoid(sql`
-    INSERT INTO provider_health (provider_id, consecutive_failures, open_until, last_error, last_error_at)
-    VALUES (${providerId}, 1, ${openUntil}, ${error}, ${now()})
-    ON CONFLICT (provider_id) DO UPDATE SET
-      consecutive_failures = provider_health.consecutive_failures + 1,
-      open_until = excluded.open_until,
-      last_error = excluded.last_error,
-      last_error_at = excluded.last_error_at
-  `)
+  // Both statements run in one transaction. The deadline is a function of the
+  // *incremented* count, and this is the only place that count is known: reading it
+  // first and writing it back would let two concurrent failures against one provider
+  // both observe the old value, so neither would trip the breaker.
+  sql.withTransaction(
+    Effect.gen(function* () {
+      const rows = yield* sql<{ readonly consecutive_failures: number }>`
+        INSERT INTO provider_health (provider_id, consecutive_failures, open_until, last_error, last_error_at)
+        VALUES (${providerId}, 1, 0, ${error}, ${now()})
+        ON CONFLICT (provider_id) DO UPDATE SET
+          consecutive_failures = provider_health.consecutive_failures + 1,
+          last_error = excluded.last_error,
+          last_error_at = excluded.last_error_at
+        RETURNING consecutive_failures
+      `
+      const failures = rows[0]?.consecutive_failures ?? 1
+      yield* sql`
+        UPDATE provider_health
+        SET open_until = ${breakerDeadline(failures, policy)}
+        WHERE provider_id = ${providerId}
+      `
+    })
+  )
 
 /** Clear breaker state for a provider, e.g. after an operator fixes its credentials. */
 export const resetProviderHealth = (

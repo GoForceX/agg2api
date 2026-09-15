@@ -17,7 +17,7 @@ const model = (id: string, publicId = id): DiscoveredModel => ({
   public_id: publicId,
   context_length: 128000,
   max_output_tokens: 4096,
-  supports_images: false,
+  capabilities: null,
   owned_by: "test",
   last_seen: Date.now()
 })
@@ -227,12 +227,18 @@ describe("health", () => {
 
         expect((yield* getProviderStatus(sql, provider.id)).consecutive_failures).toBe(0)
 
-        const openUntil = Date.now() + 60_000
-        yield* recordFailure(sql, provider.id, "boom", openUntil)
-        yield* recordFailure(sql, provider.id, "boom again", openUntil)
+        // The breaker trips only on the second failure: one failure must leave a
+        // healthy provider in rotation.
+        const policy = { threshold: 2, base_ms: 60_000, max_ms: 300_000 }
+        yield* recordFailure(sql, provider.id, "boom", policy)
+        const firstFailure = yield* getProviderStatus(sql, provider.id)
+        expect(firstFailure.consecutive_failures).toBe(1)
+        expect(firstFailure.open_until).toBe(0)
+
+        yield* recordFailure(sql, provider.id, "boom again", policy)
         const failed = yield* getProviderStatus(sql, provider.id)
         expect(failed.consecutive_failures).toBe(2)
-        expect(failed.open_until).toBe(openUntil)
+        expect(failed.open_until).toBeGreaterThan(Date.now())
         expect(failed.last_error).toBe("boom again")
 
         yield* recordSuccess(sql, provider.id, 42)

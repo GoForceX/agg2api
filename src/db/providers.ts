@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import * as SqlClient from "@effect/sql/SqlClient"
 import type { SqlError } from "@effect/sql/SqlError"
 import type { DiscoveredModel, Provider, ProviderInput, ProviderKind } from "../domain.ts"
+import { parseStored } from "../models/capabilities.ts"
 import { asBool, bool, fromJsonStringMap, fromJsonStrings, now, toJson } from "./support.ts"
 import { rowCount } from "./write.ts"
 
@@ -165,7 +166,7 @@ interface ModelRow {
   readonly public_id: string
   readonly context_length: number | null
   readonly max_output_tokens: number | null
-  readonly supports_images: number
+  readonly capabilities: string
   readonly owned_by: string | null
   readonly last_seen: number
 }
@@ -176,13 +177,13 @@ const toModel = (row: ModelRow): DiscoveredModel => ({
   public_id: row.public_id,
   context_length: row.context_length,
   max_output_tokens: row.max_output_tokens,
-  supports_images: asBool(row.supports_images),
+  capabilities: parseStored(row.capabilities),
   owned_by: row.owned_by,
   last_seen: row.last_seen
 })
 
 const MODEL_COLUMNS = `provider_id, upstream_id, public_id, context_length,
-  max_output_tokens, supports_images, owned_by, last_seen`
+  max_output_tokens, capabilities, owned_by, last_seen`
 
 export const listModels = (
   sql: SqlClient.SqlClient
@@ -231,17 +232,18 @@ export const replaceProviderModels = (
       yield* sql`
         INSERT INTO provider_models (
           provider_id, upstream_id, public_id, context_length, max_output_tokens,
-          supports_images, owned_by, raw, last_seen
+          capabilities, owned_by, raw, last_seen
         ) VALUES (
           ${providerId}, ${model.upstream_id}, ${model.public_id}, ${model.context_length},
-          ${model.max_output_tokens}, ${bool(model.supports_images)}, ${model.owned_by},
-          '{}', ${model.last_seen}
+          ${model.max_output_tokens},
+          ${model.capabilities === null ? "" : JSON.stringify(model.capabilities)},
+          ${model.owned_by}, '{}', ${model.last_seen}
         )
         ON CONFLICT (provider_id, upstream_id) DO UPDATE SET
           public_id = excluded.public_id,
           context_length = excluded.context_length,
           max_output_tokens = excluded.max_output_tokens,
-          supports_images = excluded.supports_images,
+          capabilities = excluded.capabilities,
           owned_by = excluded.owned_by,
           last_seen = excluded.last_seen
       `

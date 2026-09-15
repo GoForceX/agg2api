@@ -7,14 +7,21 @@
  * which already tolerates providers that cannot enumerate.
  */
 import * as Effect from "effect/Effect"
+import * as HttpClient from "@effect/platform/HttpClient"
 import * as Option from "effect/Option"
 import * as SqlClient from "@effect/sql/SqlClient"
-import * as HttpClient from "@effect/platform/HttpClient"
 import type { Credits, DiscoveredModel, Provider } from "../domain.ts"
+import { isRecord } from "../json.ts"
 import { createProvider, listModels, listModelsForProvider, listProviders, replaceProviderModels } from "../db/providers.ts"
 import { getCredits, saveCredits } from "../db/credits.ts"
 import { createRoute, listRoutes, resolveTargets } from "../db/routes.ts"
 import { adapterFor } from "./executor.ts"
+import {
+  fetchIndex,
+  inferCapabilities,
+  reportedCapabilities,
+  type CatalogueIndex
+} from "../models/capabilities.ts"
 import { fetchCredits } from "../upstream/workbuddy.ts"
 
 export interface DiscoveryResult {
@@ -58,7 +65,9 @@ const isAllowed = (provider: Provider, publicId: string): boolean => {
  * that provider.
  */
 export const discoverProvider = (
-  provider: Provider
+  provider: Provider,
+  /** `models.dev` index, or `null` when it could not be fetched. */
+  index: CatalogueIndex | null = null
 ): Effect.Effect<DiscoveryResult, never, HttpClient.HttpClient | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -106,7 +115,11 @@ export const discoverProvider = (
         public_id: publicId,
         context_length: model.context_length,
         max_output_tokens: model.max_output_tokens,
-        supports_images: model.supports_images,
+        capabilities: inferCapabilities(index, {
+          upstreamId: model.id,
+          baseUrl: provider.base_url,
+          reported: isRecord(model.raw) ? reportedCapabilities(model.raw) : null
+        }),
         owned_by: model.owned_by,
         last_seen: ts
       })
@@ -132,7 +145,13 @@ export const discoverAll = (): Effect.Effect<
     const sql = yield* SqlClient.SqlClient
     const providers = yield* listProviders(sql).pipe(Effect.orDie)
     const enabled = providers.filter((provider) => provider.enabled)
-    return yield* Effect.forEach(enabled, (provider) => discoverProvider(provider), {
+
+    // Fetched once per pass, not per provider: it is a single shared document, and a
+    // fetch per provider would multiply a 4 MB download by the size of the fleet.
+    const client = yield* HttpClient.HttpClient
+    const index = yield* fetchIndex(client)
+
+    return yield* Effect.forEach(enabled, (provider) => discoverProvider(provider, index), {
       concurrency: 4
     })
   })

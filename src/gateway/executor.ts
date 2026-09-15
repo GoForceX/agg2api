@@ -19,29 +19,25 @@ import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import type * as Chat from "../canonical.ts"
-import type { ProviderKind, RoutingStrategy } from "../domain.ts"
+import type { ProviderAttempt, ProviderKind, RoutingStrategy } from "../domain.ts"
 import { ProviderError, RoutingError, providerError } from "../errors.ts"
 import type { Adapter, Completion, ProviderStream, Target } from "../upstream/adapter.ts"
 import { openaiChatAdapter } from "../upstream/chat-adapter.ts"
 import { responsesAdapter } from "../upstream/responses-adapter.ts"
 import { workbuddyAdapter } from "../upstream/workbuddy.ts"
-import { getProviderStatus, recordFailure, recordSuccess } from "../db/health.ts"
+import { getProviderStatus, recordFailure, recordSuccess, type BreakerPolicy } from "../db/health.ts"
 import { resolveTargets } from "../db/routes.ts"
 import { orderCandidates, type Candidate } from "./router.ts"
 import { Sessions, preferPinned } from "./sessions.ts"
 import { AppSettings } from "./settings.ts"
 
-/** One provider attempt, recorded for the usage log and the admin UI. */
-export interface Attempt {
-  readonly provider_id: number
-  readonly provider_name: string
-  readonly provider_kind: ProviderKind
-  readonly upstream_model: string
-  readonly status: number
-  readonly error_kind: string | null
-  readonly error_message: string | null
-  readonly latency_ms: number
-}
+/**
+ * One provider attempt, recorded for the usage log and the admin UI.
+ *
+ * Aliased from the domain schema because the failure trail travels on `ProviderError`,
+ * which the handler that writes the usage row is the one to read.
+ */
+export type Attempt = ProviderAttempt
 
 /** The provider that a request was ultimately served by. */
 export interface Committed {
@@ -86,16 +82,6 @@ const attemptOf = (
   error_message: error === null ? null : error.message,
   latency_ms: latencyMs
 })
-
-/**
- * Breaker deadline for the next failure.
- *
- * Exponential in the consecutive-failure count so a provider that is briefly
- * flapping recovers quickly, while one that is genuinely down is retried rarely.
- * Capped so a provider is never permanently abandoned.
- */
-const breakerDeadline = (consecutiveFailures: number, base: number, max: number): number =>
-  Date.now() + Math.min(max, base * 2 ** Math.min(consecutiveFailures, 16))
 
 /** Result of candidate selection: the order to try, plus the affinity decision. */
 interface Plan {
@@ -297,16 +283,11 @@ const attemptWithRetries = <A>(
       status: 0,
       message: "provider failed without reporting a reason"
     })
-    yield* recordFailure(
-      sql,
-      target.provider.id,
-      error.message,
-      breakerDeadline(
-        (yield* getProviderStatus(sql, target.provider.id).pipe(Effect.orDie)).consecutive_failures,
-        limits.breaker_cooldown_base_ms,
-        limits.breaker_cooldown_max_ms
-      )
-    ).pipe(Effect.orDie)
+    yield* recordFailure(sql, target.provider.id, error.message, {
+      threshold: limits.breaker_failure_threshold,
+      base_ms: limits.breaker_cooldown_base_ms,
+      max_ms: limits.breaker_cooldown_max_ms
+    }).pipe(Effect.orDie)
     return { ok: false, error, attempts }
   })
 
@@ -354,16 +335,36 @@ const walk = <A>(
     }
 
     // Reporting the last concrete failure is more useful to the caller than a
-    // generic "all providers failed": it names a provider and a reason.
+    // generic "all providers failed": it names a provider and a reason. The trail of
+    // every candidate tried rides along, because this is the only point that knows it —
+    // and a request that failed over across three providers must not be logged as one
+    // attempt.
+    // The trail of every candidate tried rides along, because this is the only point that
+    // knows it: without it a request that failed over across three providers is logged as
+    // a single attempt, and a route that is mostly failing over looks healthy.
+    //
+    // Rebuilt through the factory rather than spread from `last`: `message` is an Error
+    // getter rather than an own property, so `{...last}` silently drops it.
     return yield* Effect.fail(
-      last ??
-        providerError({
-          provider_id: 0,
-          provider_name: "none",
-          kind: "upstream",
-          status: 502,
-          message: `no provider could serve "${ctx.public_model}"`
-        })
+      last === null
+        ? providerError({
+            provider_id: 0,
+            provider_name: "none",
+            kind: "upstream",
+            status: 502,
+            message: `no provider could serve "${ctx.public_model}"`,
+            attempts: all
+          })
+        : providerError({
+            provider_id: last.provider_id,
+            provider_name: last.provider_name,
+            kind: last.kind,
+            status: last.status,
+            message: last.message,
+            retry_after_ms: last.retry_after_ms,
+            body: last.body,
+            attempts: all
+          })
     )
   })
 

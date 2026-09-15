@@ -137,5 +137,24 @@ export const migrations: ReadonlyArray<Migration> = [
         error       TEXT
       )`
     ]
+  },
+  {
+    id: 2,
+    name: "model_capabilities",
+    statements: [
+      // A JSON `ModelCapabilities`, replacing the flat `supports_images` boolean. That
+      // boolean was only ever true when an upstream happened to report that exact field,
+      // which neither OpenAI nor any OpenAI-compatible server does — so in practice it
+      // was always false.
+      //
+      // The *source* of a claim travels inside the JSON, because a capability a provider
+      // stated about itself and one inferred from a third-party catalogue are not equally
+      // trustworthy, and the UI has to be able to tell them apart.
+      `ALTER TABLE provider_models ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`,
+      // The superseded column goes in the same migration: leaving it would keep a second,
+      // always-false answer to "does this model accept images" in the schema, and the next
+      // reader would have to find out which one is authoritative.
+      `ALTER TABLE provider_models DROP COLUMN supports_images`
+    ]
   }
 ]

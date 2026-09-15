@@ -20,6 +20,7 @@ import * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint"
 import * as HttpApiGroup from "@effect/platform/HttpApiGroup"
 import * as HttpApiSchema from "@effect/platform/HttpApiSchema"
 import * as Schema from "effect/Schema"
+import { ModelCapabilities } from "../models/capabilities.ts"
 import { AdminAuth } from "./admin/auth.ts"
 import { AdminUnauthorized } from "./admin/errors.ts"
 import { ApiKeyCreated, ApiKeyInput, ApiKeyMasked, Credits, Provider, ProviderInput, ProviderStatus, Route, RouteInput, UsageAggregate, UsagePoint, UsageSummary } from "../domain.ts"
@@ -94,6 +95,15 @@ export const ModelCard = Schema.Struct({
   /** Populated from discovery when a provider reported it. */
   context_length: Schema.optional(Schema.NullOr(Schema.Number)),
   max_output_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+  /**
+   * What the model accepts and emits.
+   *
+   * `null` — not `false` — when nothing could be established, so a client can tell
+   * "unknown" from "cannot accept images". `supports_images` is kept alongside as the
+   * derived OpenAI-style boolean, because clients written before this field existed
+   * still read it.
+   */
+  capabilities: Schema.optional(Schema.NullOr(ModelCapabilities)),
   supports_images: Schema.optional(Schema.Boolean),
   /** Every provider that can serve this model, for operator visibility. */
   providers: Schema.optional(Schema.Array(Schema.String))
@@ -261,7 +271,8 @@ export const AnthropicModelInfo = Schema.Struct({
   id: Schema.String,
   display_name: Schema.String,
   created_at: Schema.String,
-  capabilities: Schema.optional(Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+  /** Anthropic's own field; the SDKs surface it to callers. */
+  capabilities: Schema.NullOr(ModelCapabilities),
   max_input_tokens: Schema.NullOr(Schema.Number),
   max_tokens: Schema.NullOr(Schema.Number)
 })

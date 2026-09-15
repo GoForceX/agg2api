@@ -194,6 +194,38 @@ Per provider you can:
 - **Filter** with `model_allow` / `model_deny` globs, matched against the *public*
   name so an allowlist can refer to a rename.
 
+### Model capabilities
+
+Each discovered model carries what it **accepts and emits** — text, image, audio,
+video, pdf — plus whether it does tool calls, reasoning and structured output. This is
+what `/v1/models` reports, and what the route editor shows next to the chosen model.
+
+Capabilities come from two sources, tried in this order, and the answer records which
+one it used:
+
+| Tier | Source | When |
+|---|---|---|
+| 1 | **Upstream self-report** | The provider's model list carries modality fields (OpenRouter's `architecture.input_modalities`, `architecture.modality`, `supports_images`, …) |
+| 2 | **[models.dev](https://models.dev)**, provider-scoped | The provider is identified by its `base_url` host, and lists the model |
+| 3 | **models.dev**, id vote | The provider is unknown (a self-hosted proxy, a bare IP); the id is matched across the catalogue |
+
+The tiers are ordered by trust, and the *source* travels with the answer — the admin UI
+prints `上游自报` / `models.dev` / `models.dev 推断` beside the capability tags, because a
+claim the provider made about itself and one inferred from a third-party catalogue are
+not equally trustworthy.
+
+Why tier 2 exists rather than a single global id → capabilities table: roughly a third
+of the ids in models.dev appear under **several providers with disagreeing modalities**
+(394 of the 1084 multi-provider ids). A reseller may serve a feature-limited variant of
+a model another provider serves in full, so a global lookup answers confidently and
+wrongly. Scoping to the provider by base URL is what makes the answer about *your*
+upstream.
+
+Tier 3 declines to answer on a genuinely split vote, and an id nothing matches yields
+`capabilities: null` — "unknown" is reported as unknown rather than defaulted to
+text-only. Fetching models.dev is best-effort: if it fails, the gateway logs nothing
+fatal, keeps serving, and simply reports no inference for that refresh.
+
 `routes/sync` reconciles routes with what discovery can see. It creates a route for
 each newly discovered public model and drops routes whose model has disappeared.
 **A route you have curated by hand — one with multiple targets — is never
@@ -291,8 +323,8 @@ the two protocols define the same path with incompatible bodies** — which is w
 Anthropic surface is mounted under `/anthropic` rather than sharing `/v1`:
 
 - `GET /v1/models` — OpenAI's list: `{object:"list", data:[{id, object:"model", created,
-  owned_by, …}]}`, plus `context_length`, `max_output_tokens`, `supports_images` and the
-  serving providers where known as gateway extensions.
+  owned_by, …}]}`, plus `context_length`, `max_output_tokens`, `capabilities`,
+  `supports_images` and the serving providers where known as gateway extensions.
 - `GET /anthropic/v1/models` — Anthropic's list: `{data, first_id, last_id, has_more}`
   where each entry is `{type:"model", id, display_name, created_at, max_input_tokens,
   max_tokens}`. `created_at` is an RFC 3339 string, and the pagination cursors are
@@ -378,8 +410,8 @@ live in SQLite and are edited at runtime — nothing there needs a restart.
 | `request_timeout_ms` | `300000` | per-attempt upstream deadline |
 | `max_body_bytes` | `16777216` | request body cap |
 | `log_retention_days` | `30` | usage rows older than this are pruned hourly (`0` keeps all) |
-| `discovery_interval_s` | `3600` | background discovery cadence (`0` disables) |
-| `breaker_failure_threshold` | `3` | **on/off switch only** — any value > 0 enables the breaker, `0` disables it. The number is not yet compared against a failure count, so one failure takes a provider out of rotation for the cooldown. |
+| `discovery_interval_s` | `3600` | background discovery cadence (`0` disables). Also the models.dev capability refresh cadence |
+| `breaker_failure_threshold` | `3` | Consecutive failures before a provider is taken out of rotation. `0` disables the breaker entirely; any value above `0` is the count that must be reached. A success resets the count. |
 | `breaker_cooldown_base_ms` / `_max_ms` | `5000` / `300000` | backoff bounds |
 | `session_ttl_ms` | `1800000` | idle lifetime of a session→provider pin for cache affinity; `0` disables |
 | `session_max_entries` | `10000` | max tracked sessions, oldest evicted first |
@@ -434,6 +466,8 @@ src/
     responses-adapter.ts
   responses/           Responses API types and conversions
   anthropic/           Anthropic Messages types and conversions
+  models/
+    capabilities.ts    model capabilities: upstream claim → models.dev → id vote
   gateway/
     router.ts          candidate ordering (pure)
     sessions.ts        cache-affinity pins (pure key derivation + bounded store)

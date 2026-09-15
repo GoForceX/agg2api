@@ -46,13 +46,25 @@ export type ProviderInput = {
   max_retries?: number
 }
 
+export type ModelCapabilities = {
+  input: string[]
+  output: string[]
+  tool_call: boolean | null
+  reasoning: boolean | null
+  structured_output: boolean | null
+  attachment: boolean | null
+  /** Which tier answered: the provider itself, or a models.dev lookup. */
+  source: "upstream" | "models.dev" | "models.dev-nearest"
+}
+
 export type DiscoveredModel = {
   provider_id: number
   upstream_id: string
   public_id: string
   context_length: number | null
   max_output_tokens: number | null
-  supports_images: boolean
+  /** `null` means unknown, which is not the same as "text only". */
+  capabilities: ModelCapabilities | null
   owned_by: string | null
   last_seen: number
 }

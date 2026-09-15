@@ -380,9 +380,14 @@ describe("listModels", () => {
       expect(models[0]?.id).toBe("m1")
       expect(models[0]?.context_length).toBe(128_000)
       expect(models[0]?.max_output_tokens).toBe(8192)
-      expect(models[0]?.supports_images).toBe(true)
       expect(models[0]?.owned_by).toBe("workbuddy")
-      expect(models[0]?.raw).toMatchObject({ reasoning_supported_efforts: ["low", "high"] })
+      // The nested capability fields are no longer parsed here — capability inference
+      // reads them off `raw`, so this asserts the payload that inference depends on
+      // actually survives intact.
+      expect(models[0]?.raw).toMatchObject({
+        meta: { supports_images: true },
+        reasoning_supported_efforts: ["low", "high"]
+      })
     } finally {
       await mock.stop()
     }

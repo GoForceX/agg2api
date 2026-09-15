@@ -76,7 +76,9 @@ const toUpstreamModel = (entry: Record<string, unknown>): UpstreamModel | null =
     id,
     context_length: asNumber(pick("context_length")),
     max_output_tokens: asNumber(pick("max_output_tokens")),
-    supports_images: asBoolean(pick("supports_images")) ?? false,
+    // Capability fields are not parsed here: the entry is kept verbatim in `raw`, and
+    // capability inference reads it from there so one parser covers every upstream
+    // dialect rather than each adapter inventing its own.
     owned_by: asString(pick("owned_by")),
     raw: entry
   }
