@@ -38,6 +38,24 @@ export const bearerToken = (header: string | null): string | null => {
 }
 
 /**
+ * The credential a request presents, whichever way its protocol spells it.
+ *
+ * OpenAI-shaped clients send `Authorization: Bearer <key>`, but the Anthropic SDKs send
+ * `x-api-key` and no Authorization header at all. Reading only the bearer form rejected
+ * every Anthropic client — including when keys were not even required, because a
+ * *presented* key is validated rather than downgraded to anonymous.
+ */
+export const presentedToken = (headers: {
+  readonly authorization?: string | undefined
+  readonly "x-api-key"?: string | undefined
+}): string | null => {
+  const bearer = bearerToken(headers.authorization ?? null)
+  if (bearer !== null) return bearer
+  const apiKey = headers["x-api-key"]
+  return typeof apiKey === "string" && apiKey.trim() !== "" ? apiKey.trim() : null
+}
+
+/**
  * Resolve the caller for a request.
  *
  * A presented-but-unknown key is always rejected, even when keys are not required:
@@ -45,11 +63,14 @@ export const bearerToken = (header: string | null): string | null => {
  * misconfiguration look like success and hand out unauthenticated traffic.
  */
 export const authenticate = (
-  authorization: string | null
+  headers: {
+    readonly authorization?: string | undefined
+    readonly "x-api-key"?: string | undefined
+  }
 ): Effect.Effect<Caller, ClientError, SqlClient.SqlClient | AppSettings> =>
   Effect.gen(function* () {
     const settings = yield* AppSettings
-    const token = bearerToken(authorization)
+    const token = presentedToken(headers)
 
     if (token === null) {
       if (!settings.require_client_key) return ANONYMOUS

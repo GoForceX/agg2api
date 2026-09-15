@@ -20,7 +20,7 @@ import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as Stream from "effect/Stream"
 import * as Chat from "../canonical.ts"
-import type { Endpoint, RoutingStrategy } from "../domain.ts"
+import type { DiscoveredModel, Endpoint, RoutingStrategy } from "../domain.ts"
 import { ProviderError, RoutingError, badRequest, notFound, type ClientError } from "../errors.ts"
 import { AppSettings } from "../gateway/settings.ts"
 import { execute, executeStream } from "../gateway/executor.ts"
@@ -151,7 +151,12 @@ export const openEpisode = (
     }
     const tooLarge = badRequest(`request body exceeds ${settings.max_body_bytes} bytes`)
 
-    const caller = yield* authenticate(header(request.headers, "authorization"))
+    // Both credential spellings are read: the Anthropic SDKs present `x-api-key` and no
+    // Authorization header at all, while OpenAI-shaped clients send a bearer token.
+    const caller = yield* authenticate({
+      authorization: header(request.headers, "authorization") ?? undefined,
+      "x-api-key": header(request.headers, "x-api-key") ?? undefined
+    })
     const clientIp =
       header(request.headers, "cf-connecting-ip") ??
       header(request.headers, "x-forwarded-for")?.split(",")[0]?.trim() ??
@@ -533,14 +538,32 @@ const responses = (holder: EpisodeHolder) => Effect.gen(function* () {
 // Model listing
 // ---------------------------------------------------------------------------
 
+/**
+ * The public model catalogue with its per-model metadata.
+ *
+ * Shared by the OpenAI and Anthropic listings, which need the same facts in different
+ * envelopes — the lookup is what makes the two views agree about a model.
+ */
+export const modelCatalogue = Effect.gen(function* () {
+  const entries = yield* catalogue()
+  const out: Array<{
+    readonly entry: { public_model: string; display_name: string | null; providers: ReadonlyArray<string> }
+    readonly metadata: DiscoveredModel | null
+  }> = []
+  for (const entry of entries) {
+    const metadata = yield* modelMetadata(entry.public_model)
+    out.push({ entry, metadata })
+  }
+  return out
+})
+
 const models = Effect.gen(function* () {
   // Admission control only; the call itself is what authenticates the request.
   yield* openEpisode("chat", { require_model: false })
-  const entries = yield* catalogue()
+  const entries = yield* modelCatalogue
 
   const cards: ModelCard[] = []
-  for (const entry of entries) {
-    const metadata = yield* modelMetadata(entry.public_model)
+  for (const { entry, metadata } of entries) {
     cards.push({
       id: entry.public_model,
       object: "model",
@@ -707,12 +730,6 @@ export const v1Handlers = HttpApiBuilder.group(api, "v1", (h) =>
     .handleRaw("responses", () => {
       const holder: EpisodeHolder = { episode: null }
       return guard(responses(holder), holder, (response) => response)
-    })
-    .handleRaw("messages", () => {
-      const holder: EpisodeHolder = { episode: null }
-      // Anthropic clients read `{type:"error",error:{type,message}}`, not OpenAI's
-      // envelope, so this endpoint renders failures through its own renderer.
-      return guard(anthropicMessages(holder), holder, (response) => response, anthropicErrors)
     })
     .handleRaw("models", () => {
       const holder: EpisodeHolder = { episode: null }

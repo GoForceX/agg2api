@@ -13,6 +13,8 @@
  *   simply ends after `message_stop`. `sse.encode` would append a terminator this
  *   protocol does not define, so `namedBody` is used instead.
  */
+import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
@@ -26,11 +28,12 @@ import {
   toCanonical
 } from "../anthropic/convert.ts"
 import * as Chat from "../canonical.ts"
-import type { ClientError, ProviderError, RoutingError } from "../errors.ts"
+import { notFound, type ClientError, type ProviderError, type RoutingError } from "../errors.ts"
 import { newUsageAccumulator, recordSuccess, type UsageAccumulator } from "../gateway/accounting.ts"
 import { execute, executeStream } from "../gateway/executor.ts"
 import * as sse from "../upstream/sse.ts"
-import { guard, openEpisode, settle, withAffinity, type EpisodeHolder, type ErrorRenderer } from "./handlers-v1.ts"
+import { api, type AnthropicModelInfo } from "./api.ts"
+import { guard, modelCatalogue, openEpisode, settle, withAffinity, type EpisodeHolder, type ErrorRenderer } from "./handlers-v1.ts"
 
 // ---------------------------------------------------------------------------
 // Error rendering
@@ -191,3 +194,84 @@ export const anthropicMessages = (holder: EpisodeHolder) => Effect.gen(function*
   // The public name the caller asked for, not the provider's internal model id.
   return HttpServerResponse.unsafeJson(toAnthropic(response, { id: messageId, model: publicModel }))
 })
+
+// ---------------------------------------------------------------------------
+// Model listing
+// ---------------------------------------------------------------------------
+
+/**
+ * Anthropic's model catalogue.
+ *
+ * Separate from the OpenAI listing because the two protocols disagree about the shape,
+ * not just the envelope: `type` instead of `object`, `max_input_tokens` instead of
+ * `context_length`, and `created_at` as an RFC 3339 string instead of the Unix `created`
+ * the OpenAI object carries. The Anthropic SDKs parse this shape, so serving them the
+ * OpenAI object leaves `display_name` and the token limits undefined.
+ */
+const anthropicModels = Effect.gen(function* () {
+  yield* openEpisode("chat", { require_model: false })
+  const entries = yield* modelCatalogue
+
+  const data: AnthropicModelInfo[] = entries.map(({ entry, metadata }) => ({
+    type: "model" as const,
+    id: entry.public_model,
+    // Anthropic's `display_name` is not nullable; the public id is the honest fallback.
+    display_name: entry.display_name ?? entry.public_model,
+    // The gateway does not track per-model release dates, so the epoch is stated rather
+    // than invented. Clients only render it.
+    created_at: new Date(0).toISOString(),
+    max_input_tokens: metadata?.context_length ?? null,
+    max_tokens: metadata?.max_output_tokens ?? null
+  }))
+
+  // No pagination: the catalogue is returned whole, and the cursors must still be
+  // present because the SDKs read them to populate their pagination state.
+  return {
+    data,
+    first_id: data[0]?.id ?? null,
+    last_id: data.at(-1)?.id ?? null,
+    has_more: false
+  }
+})
+
+const anthropicModel = Effect.gen(function* () {
+  yield* openEpisode("chat", { require_model: false })
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const id = decodeURIComponent(
+    new URL(request.url, "http://localhost").pathname.replace(/^\/anthropic\/v1\/models\//, "")
+  )
+
+  const entries = yield* modelCatalogue
+  const found = entries.find((entry) => entry.entry.public_model === id)
+  if (found === undefined) {
+    return yield* Effect.fail(notFound(`no such model: ${id}`))
+  }
+
+  const card: AnthropicModelInfo = {
+    type: "model",
+    id,
+    display_name: found.entry.display_name ?? id,
+    created_at: new Date(0).toISOString(),
+    max_input_tokens: found.metadata?.context_length ?? null,
+    max_tokens: found.metadata?.max_output_tokens ?? null
+  }
+  return card
+})
+
+export const anthropicHandlers = HttpApiBuilder.group(api, "anthropic", (h) =>
+  h
+    .handleRaw("messages", () => {
+      const holder: EpisodeHolder = { episode: null }
+      // Anthropic clients read `{type:"error",error:{type,message}}`, not OpenAI's
+      // envelope, so this endpoint renders failures through its own renderer.
+      return guard(anthropicMessages(holder), holder, (response) => response, anthropicErrors)
+    })
+    .handleRaw("models", () => {
+      const holder: EpisodeHolder = { episode: null }
+      return guard(anthropicModels, holder, (value) => HttpServerResponse.unsafeJson(value), anthropicErrors)
+    })
+    .handleRaw("model", () => {
+      const holder: EpisodeHolder = { episode: null }
+      return guard(anthropicModel, holder, (value) => HttpServerResponse.unsafeJson(value), anthropicErrors)
+    })
+)

@@ -214,19 +214,6 @@ const v1 = HttpApiGroup.make("v1")
       .addError(ErrorEnvelope, { status: 503 })
   )
   .add(
-    HttpApiEndpoint.post("messages")`/v1/messages`
-      .setPayload(UnknownBody)
-      // No success schema: the handler returns an `HttpServerResponse` itself so it
-      // can choose between a buffered JSON body and a streaming SSE body.
-      .addError(ErrorEnvelope, { status: 400 })
-      .addError(ErrorEnvelope, { status: 401 })
-      .addError(ErrorEnvelope, { status: 403 })
-      .addError(ErrorEnvelope, { status: 404 })
-      .addError(ErrorEnvelope, { status: 429 })
-      .addError(ErrorEnvelope, { status: 502 })
-      .addError(ErrorEnvelope, { status: 503 })
-  )
-  .add(
     HttpApiEndpoint.get("models")`/v1/models`
       .addSuccess(Schema.Struct({ object: Schema.Literal("list"), data: Schema.Array(ModelCard) }))
       .addError(ErrorEnvelope, { status: 401 })
@@ -240,6 +227,95 @@ const v1 = HttpApiGroup.make("v1")
       .addError(ErrorEnvelope, { status: 403 })
       .addError(ErrorEnvelope, { status: 404 })
       .addError(ErrorEnvelope, { status: 429 })
+  )
+
+// ---------------------------------------------------------------------------
+// Anthropic group
+// ---------------------------------------------------------------------------
+
+/**
+ * Anthropic's `ModelInfo`, which is a different shape from OpenAI's `Model` under the
+ * same path — `type` rather than `object`, `created_at` as an RFC 3339 string rather
+ * than a Unix `created`, and `max_input_tokens` rather than `context_length`. The
+ * Anthropic SDKs parse exactly this, so serving them the OpenAI object leaves
+ * `display_name` and the token limits undefined.
+ */
+/**
+ * Anthropic's error envelope.
+ *
+ * Unlike OpenAI's, it carries no `code` and no nested `param`: the error *type* is the
+ * machine-readable part, and a message. Declared here so the contract describes what
+ * the handlers emit rather than only the success shape.
+ */
+export const AnthropicErrorEnvelope = Schema.Struct({
+  type: Schema.Literal("error"),
+  error: Schema.Struct({
+    type: Schema.String,
+    message: Schema.String
+  })
+})
+export type AnthropicErrorEnvelope = typeof AnthropicErrorEnvelope.Type
+
+export const AnthropicModelInfo = Schema.Struct({
+  type: Schema.Literal("model"),
+  id: Schema.String,
+  display_name: Schema.String,
+  created_at: Schema.String,
+  capabilities: Schema.optional(Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+  max_input_tokens: Schema.NullOr(Schema.Number),
+  max_tokens: Schema.NullOr(Schema.Number)
+})
+export type AnthropicModelInfo = typeof AnthropicModelInfo.Type
+
+/**
+ * Anthropic's list envelope. `first_id`, `last_id` and `has_more` are not optional:
+ * the SDKs read them to populate their pagination cursors, and a missing key is
+ * undefined rather than an empty page.
+ */
+export const AnthropicModelList = Schema.Struct({
+  data: Schema.Array(AnthropicModelInfo),
+  first_id: Schema.NullOr(Schema.String),
+  last_id: Schema.NullOr(Schema.String),
+  has_more: Schema.Boolean
+})
+
+/**
+ * The Anthropic surface.
+ *
+ * Mounted under `/anthropic` rather than alongside the OpenAI paths. Both protocols
+ * define `GET /v1/models` with the same path and incompatible bodies, so a single
+ * mount point cannot answer both — and `<host>/anthropic` is the base URL the
+ * Anthropic SDKs are configured with, so `base_url` plus the SDK's own `/v1/...`
+ * produces exactly these paths.
+ */
+const anthropic = HttpApiGroup.make("anthropic")
+  .add(
+    HttpApiEndpoint.post("messages")`/anthropic/v1/messages`
+      .setPayload(UnknownBody)
+      // No success schema: the handler returns an `HttpServerResponse` itself so it
+      // can choose between a buffered JSON body and a streaming SSE body.
+      .addError(AnthropicErrorEnvelope, { status: 400 })
+      .addError(AnthropicErrorEnvelope, { status: 401 })
+      .addError(AnthropicErrorEnvelope, { status: 403 })
+      .addError(AnthropicErrorEnvelope, { status: 404 })
+      .addError(AnthropicErrorEnvelope, { status: 429 })
+      .addError(AnthropicErrorEnvelope, { status: 502 })
+      .addError(AnthropicErrorEnvelope, { status: 503 })
+  )
+  .add(
+    HttpApiEndpoint.get("models")`/anthropic/v1/models`
+      .addSuccess(AnthropicModelList)
+      .addError(AnthropicErrorEnvelope, { status: 401 })
+      .addError(AnthropicErrorEnvelope, { status: 403 })
+      .addError(AnthropicErrorEnvelope, { status: 429 })
+  )
+  .add(
+    HttpApiEndpoint.get("model")`/anthropic/v1/models/${Schema.String}`
+      .addSuccess(AnthropicModelInfo)
+      .addError(AnthropicErrorEnvelope, { status: 401 })
+      .addError(AnthropicErrorEnvelope, { status: 403 })
+      .addError(AnthropicErrorEnvelope, { status: 404 })
+      .addError(AnthropicErrorEnvelope, { status: 429 })
   )
 
 // ---------------------------------------------------------------------------
@@ -418,7 +494,7 @@ const admin = HttpApiGroup.make("admin")
 // API
 // ---------------------------------------------------------------------------
 
-export const api = HttpApi.make("agg2api").add(v1).add(ops).add(admin)
+export const api = HttpApi.make("agg2api").add(v1).add(anthropic).add(ops).add(admin)
 
 /** Aggregates visible in the usage summary. */
 export const UsageBreakdown = Schema.Literal("model", "provider", "key")

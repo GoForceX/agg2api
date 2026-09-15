@@ -455,6 +455,72 @@ describe("admin API over HTTP", () => {
   })
 })
 
+describe("protocol surfaces", () => {
+  test("keeps the OpenAI and Anthropic model listings on separate paths", async () => {
+    // Both protocols define `GET /v1/models` with incompatible bodies — OpenAI's
+    // `{object,data:[{object:"model",created,...}]}` against Anthropic's
+    // `{data,first_id,last_id,has_more}` with `type`/`created_at`/`max_input_tokens` —
+    // so a single mount point cannot answer both.
+    const openai = await request("/v1/models")
+    expect(openai.status).toBe(200)
+    const openaiBody = (await openai.json()) as Record<string, unknown>
+    expect(openaiBody.object).toBe("list")
+    expect(Array.isArray(openaiBody.data)).toBe(true)
+    expect(openaiBody.first_id).toBeUndefined()
+
+    const anthropic = await request("/anthropic/v1/models")
+    expect(anthropic.status).toBe(200)
+    const anthropicBody = (await anthropic.json()) as {
+      data: Array<Record<string, unknown>>
+      first_id: string | null
+      last_id: string | null
+      has_more: boolean
+    }
+    // The SDKs read the cursors, so their absence is not an empty page but a crash.
+    expect(anthropicBody.has_more).toBe(false)
+    expect(anthropicBody.last_id).toBe((anthropicBody.data.at(-1)?.id as string | undefined) ?? null)
+
+    const entry = anthropicBody.data[0]
+    expect(entry?.type).toBe("model")
+    expect(typeof entry?.created_at).toBe("string")
+    expect(typeof entry?.display_name).toBe("string")
+    expect(entry).toHaveProperty("max_input_tokens")
+    expect(entry).toHaveProperty("max_tokens")
+    // Anthropic's object has no `object`/`created`/`context_length` fields.
+    expect(entry?.object).toBeUndefined()
+    expect(entry?.created).toBeUndefined()
+    expect(entry?.context_length).toBeUndefined()
+  })
+
+  test("serves Messages under /anthropic and nowhere else", async () => {
+    const body = JSON.stringify({ model: "test-model", max_tokens: 16, messages: [{ role: "user", content: "hi" }] })
+    const headers = { "content-type": "application/json" }
+
+    const moved = await request("/anthropic/v1/messages", { method: "POST", headers, body })
+    expect(moved.status).toBe(200)
+    expect(((await moved.json()) as { type: string }).type).toBe("message")
+
+    // The old path must not linger as an alias.
+    const gone = await request("/v1/messages", { method: "POST", headers, body })
+    expect(gone.status).toBe(404)
+  })
+
+  test("accepts an Anthropic client key sent as x-api-key", async () => {
+    // The Anthropic SDKs authenticate with `x-api-key` and send no Authorization header
+    // at all, so a bearer-only check rejected every Anthropic client.
+    const body = JSON.stringify({ model: "test-model", max_tokens: 16, messages: [{ role: "user", content: "hi" }] })
+    const response = await request("/anthropic/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "anything", "anthropic-version": "2023-06-01" },
+      body
+    })
+    // Keys are not required in this configuration, and a *presented* key is validated
+    // rather than downgraded, so an unknown one is rejected as such — not as "missing".
+    expect(response.status).toBe(401)
+    expect(((await response.json()) as { error: { message: string } }).error.message).toContain("key")
+  })
+})
+
 describe("v1 over HTTP", () => {
   test("buffers a chat completion and reports the public model name", async () => {
     const response = await chat({ model: "test-model", messages: [{ role: "user", content: "hi" }] })

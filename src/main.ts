@@ -30,6 +30,7 @@ import { adminHandlers } from "./http/admin/handlers.ts"
 import { adminAuthLayer } from "./http/admin/auth.ts"
 import { adminMiddleware } from "./http/admin/middleware.ts"
 import { api } from "./http/api.ts"
+import { anthropicHandlers } from "./http/handlers-anthropic.ts"
 import { opsHandlers, v1Handlers } from "./http/handlers-v1.ts"
 
 /**
@@ -167,7 +168,7 @@ const application = (settings: Settings) => {
     // The admin group's middleware is resolved when its routes are built, so the guard
     // is supplied to the group layers rather than to the server.
     Layer.provide(
-      Layer.mergeAll(v1Handlers, opsHandlers, adminHandlers).pipe(
+      Layer.mergeAll(v1Handlers, anthropicHandlers, opsHandlers, adminHandlers).pipe(
         Layer.provide(adminAuthLayer(settings.admin_token))
       )
     ),

@@ -220,7 +220,7 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 OPENAI_API_KEY=<client key 或任意值>
 
 # Anthropic 兼容
-ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787/anthropic
 ```
 
 顺便建议加一个头，能显著提升缓存命中：

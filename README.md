@@ -11,7 +11,7 @@ kind:
 |---|---|---|
 | OpenAI Chat Completions | `POST /v1/chat/completions` | OpenAI envelope |
 | OpenAI Responses | `POST /v1/responses` | OpenAI envelope |
-| Anthropic Messages | `POST /v1/messages` | Anthropic envelope |
+| Anthropic Messages | `POST /anthropic/v1/messages` | Anthropic envelope |
 
 Each protocol reports failures in its **own** error shape, so the matching SDK
 handles them without special-casing the gateway.
@@ -246,18 +246,26 @@ curl localhost:8787/v1/responses \
 | `x-session-id` | Names the session for [cache affinity](#session-affinity-cache-aware-routing). Wins over prefix inference, so it keeps a conversation pinned even when its prompt changes. |
 | `x-request-id` | Correlation id, echoed into the usage log. Generated when absent. |
 
-### `POST /v1/messages`
+### `POST /anthropic/v1/messages`
 
 Anthropic Messages, including streaming (`event:`-named SSE frames) and tool use.
 
 ```bash
-curl localhost:8787/v1/messages \
+curl localhost:8787/anthropic/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{"model":"fast","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
-Point an Anthropic SDK at the gateway by setting its base URL to the gateway root —
-`max_tokens` is required, exactly as the real API requires it.
+Point an Anthropic SDK at the gateway by setting its base URL to the gateway's
+`/anthropic` prefix — the SDK appends `/v1/messages` itself, so:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787/anthropic
+export ANTHROPIC_API_KEY=<client key>
+```
+
+`max_tokens` is required, exactly as the real API requires it. The key may be sent as
+`x-api-key` (what the SDKs do) or as an `Authorization: Bearer` header.
 
 Protocol details worth knowing:
 
@@ -276,10 +284,19 @@ Protocol details worth knowing:
 - Streaming is `message_start` → `content_block_*` → `message_delta` → `message_stop`.
   There is **no** `[DONE]` sentinel, because the Anthropic protocol does not define one.
 
-### `GET /v1/models`
+### `GET /v1/models` and `GET /anthropic/v1/models`
 
-The models available right now, in OpenAI's list shape, with `context_length`,
-`max_output_tokens`, `supports_images` and the serving providers where known.
+The models available right now. **Both paths exist and return different shapes, because
+the two protocols define the same path with incompatible bodies** — which is why the
+Anthropic surface is mounted under `/anthropic` rather than sharing `/v1`:
+
+- `GET /v1/models` — OpenAI's list: `{object:"list", data:[{id, object:"model", created,
+  owned_by, …}]}`, plus `context_length`, `max_output_tokens`, `supports_images` and the
+  serving providers where known as gateway extensions.
+- `GET /anthropic/v1/models` — Anthropic's list: `{data, first_id, last_id, has_more}`
+  where each entry is `{type:"model", id, display_name, created_at, max_input_tokens,
+  max_tokens}`. `created_at` is an RFC 3339 string, and the pagination cursors are
+  present (with `has_more: false`) because the SDKs read them.
 
 ### Errors
 
@@ -291,7 +308,7 @@ OpenAI (`/v1/chat/completions`, `/v1/responses`):
 { "error": { "message": "…", "type": "upstream_error", "code": "rate_limit" } }
 ```
 
-Anthropic (`/v1/messages`):
+Anthropic (`/anthropic/v1/messages`):
 
 ```json
 { "type": "error", "error": { "type": "not_found_error", "message": "…" } }
@@ -377,7 +394,7 @@ cost column. Leave them unset and cost is reported as `0` rather than guessed �
 ```
 client ──► /v1/chat/completions ─┐
           /v1/responses         ─┤
-          /v1/messages          ─┤
+     /anthropic/v1/messages       ─┤
                                  ▼
                         ┌─────────────────┐
                         │  v1 handlers    │  client protocol ⇄ canonical chat

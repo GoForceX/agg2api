@@ -570,7 +570,7 @@ const main = async () => {
     )
 
     // --- Anthropic Messages API --------------------------------------------
-    const messagesBuffered = await client(base, "/v1/messages", {
+    const messagesBuffered = await client(base, "/anthropic/v1/messages", {
       method: "POST",
       body: JSON.stringify({
         model: "mock-fast",
@@ -599,7 +599,7 @@ const main = async () => {
       JSON.stringify(messagesBody.usage)
     )
 
-    const messagesStreamed = await client(base, "/v1/messages", {
+    const messagesStreamed = await client(base, "/anthropic/v1/messages", {
       method: "POST",
       body: JSON.stringify({
         model: "mock-fast",
@@ -623,7 +623,7 @@ const main = async () => {
     )
 
     // --- Anthropic: tool calls become tool_use blocks with parsed input -----
-    const toolResponse = await client(base, "/v1/messages", {
+    const toolResponse = await client(base, "/anthropic/v1/messages", {
       method: "POST",
       body: JSON.stringify({
         model: "mock-fast",
@@ -655,7 +655,7 @@ const main = async () => {
     )
 
     // --- Anthropic uses its own error envelope, not OpenAI's ---------------
-    const anthropicError = await client(base, "/v1/messages", {
+    const anthropicError = await client(base, "/anthropic/v1/messages", {
       method: "POST",
       body: JSON.stringify({ model: "ghost-model", max_tokens: 16, messages: [{ role: "user", content: "hi" }] })
     })

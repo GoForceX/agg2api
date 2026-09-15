@@ -280,7 +280,7 @@ const main = async () => {
   }
   await client("/v1/responses", { model: "demo-mini", input: "hello" }).then((response) => response.text())
   for (let i = 0; i < 3; i += 1) {
-    await client("/v1/messages", {
+    await client("/anthropic/v1/messages", {
       model: "demo-mini",
       max_tokens: 128,
       messages: [{ role: "user", content: "hello from anthropic" }]
@@ -292,7 +292,8 @@ const main = async () => {
   console.log(`\n  agg2api demo ready`)
   console.log(`    dashboard : http://127.0.0.1:${GATEWAY_PORT}/admin/`)
   console.log(`    admin token: ${ADMIN_TOKEN}`)
-  console.log(`    API base   : http://127.0.0.1:${GATEWAY_PORT}/v1`)
+  console.log(`    OpenAI API : http://127.0.0.1:${GATEWAY_PORT}/v1`)
+  console.log(`    Anthropic  : http://127.0.0.1:${GATEWAY_PORT}/anthropic`)
   console.log(`    database   : ${join(workdir, "demo.db")}\n`)
 
   const shutdown = () => {
