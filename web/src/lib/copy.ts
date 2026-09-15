@@ -109,7 +109,11 @@ export const COPY = {
     probing: "探测中…",
     clearFilters: "清除筛选",
     loadMore: "加载更多",
-    showSecret: "显示密钥"
+    showSecret: "显示密钥",
+    previous: "上一页",
+    next: "下一页",
+    addEntry: "添加一项",
+    removeEntry: (name: string) => `移除 ${name}`
   },
 
   state: {
@@ -128,6 +132,12 @@ export const COPY = {
     ok: "正常",
     failed: "失败",
     succeeded: "成功"
+  },
+
+  /** Pagination, shared by every paged table. */
+  pager: {
+    range: (first: number, last: number, total: number) => `${first}–${last} / 共 ${total} 条`,
+    pageOf: (page: number, pages: number) => `第 ${page} / ${pages} 页`
   },
 
   /** Shared table and card headings, so two views cannot label one column differently. */
@@ -153,7 +163,8 @@ export const COPY = {
     detail: "详情",
     attempts: "尝试次数",
     endpoint: "协议",
-    stream: "流式"
+    stream: "流式",
+    actions: "操作"
   },
 
   metric: {
@@ -174,6 +185,8 @@ export const COPY = {
     requests: "请求",
     errors: "错误",
     noRequests: "该时间窗口内没有请求。",
+    requestsOverTime: "请求随时间变化",
+    label: (window: string) => `最近 ${window} 内每个时间分桶的请求数`,
     tooltip: (time: string, requests: string, errors: string) => `${time} · ${requests} 个请求 · ${errors} 个错误`
   },
 
@@ -244,8 +257,6 @@ export const COPY = {
     ttftHint: "首个 Token 的延迟",
     cacheBarLabel: (rate: string) => `输入缓存命中率 ${rate}`,
     cacheNote: (cached: string, prompt: string) => `${prompt} 个输入 Token 中有 ${cached} 个来自上游缓存。`,
-    requestsOverTime: "请求随时间变化",
-    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`,
     noUsage: "暂无用量数据。",
     aggregateKey: "分组"
   },
@@ -289,9 +300,8 @@ export const COPY = {
     },
     disabled: "已停用",
     cooling: "冷却中",
-    /** Provider table headings that no other view shares. */
+    /** Provider table heading that no other view shares. */
     credits: "余额",
-    actions: "操作",
     discoverAll: "全部拉取模型",
     discoveringAll: "正在拉取全部上游…",
     refreshCredits: "刷新余额",
@@ -337,14 +347,37 @@ export const COPY = {
     add: "新建路由",
     edit: "编辑路由",
     editTitle: (model: string) => `编辑路由：${model}`,
-    empty: "还没有路由。可以同步模型发现自动生成，也可以手动新建。",
+    empty: "还没有路由。拉取模型并同步之后会自动生成。",
     publicModelHint: "客户端请求时使用的模型名。",
     targetsHint: "同一策略下的多个上游会按优先级或权重选择。",
     upstreamModelHint: "留空表示与对外模型名相同。",
     deleteConfirm: "删除该路由后，客户端请求这个模型会返回 404。确定删除吗？",
     syncResult: (created: number, updated: number, removed: number) =>
       `新增 ${created} 个，更新 ${updated} 个，移除 ${removed} 个`,
-    noTargets: "该路由没有可用上游，所有请求都会失败。"
+    noTargets: "该路由没有可用上游，所有请求都会失败。",
+    /** Legend under the heading: how the gateway default and `inherit` interact. */
+    strategyLegend: (strategy: string) =>
+      `网关默认策略为 ${strategy}；设为“继承默认”的路由会跟随它。按优先级时，由优先级最高且可用的目标上游处理每个请求；按权重时，优先级同时是权重，任何可用的目标上游都可能被选中。`,
+    inherit: "继承默认",
+    resolvedTo: (strategy: string) => `解析为 ${strategy}`,
+    cardSubtitle: (model: string, targets: number, updated: string) =>
+      `${model} · ${targets} 个目标上游 · 更新于 ${updated}`,
+    displayName: "显示名称",
+    displayNameHint: "可选，只在本控制台显示的名称。",
+    serving: "服务中",
+    servingVia: (provider: string, model: string) => `由 ${provider} → ${model} 提供服务`,
+    weightedEligible: (targets: number) => `${targets} 个可用目标上游，按优先级加权`,
+    preferredColumn: "首选",
+    targetsEmpty: "暂无目标上游。",
+    targetsEmptyHint: "还没有目标上游。没有目标上游的路由会让该模型返回 404。",
+    selectProvider: "选择上游",
+    selectProviderFirst: "请先选择上游",
+    noDiscoveredModels: "没有已发现的模型",
+    selectModel: "选择模型",
+    disabledSuffix: "（已停用）",
+    notDiscovered: (model: string) => `${model}（未发现）`,
+    addTarget: "添加目标上游",
+    removeTarget: "移除目标上游"
   },
 
   keys: {
@@ -374,8 +407,7 @@ export const COPY = {
     secretImmutable: "密钥本身无法修改或再次查看；如需轮换请删除后重建。",
     namePlaceholder: "prod-app",
     modelsPlaceholder: "gpt-4o\nclaude-*",
-    doneButton: "我已保存",
-    actions: "操作"
+    doneButton: "我已保存"
   },
 
   usage: {
@@ -401,8 +433,6 @@ export const COPY = {
     breakdown: "分组统计",
     totalsLast: (window: string) => `最近 ${window}合计`,
     bucketEvery: (bucket: string) => `每 ${bucket}聚合一个数据点`,
-    requestsOverTime: "请求随时间变化",
-    chartLabel: (window: string) => `最近 ${window} 内每个时间分桶的请求数`,
     reasoningTokens: "推理 Token",
     requestId: "请求 ID",
     ttft: "首字延迟",

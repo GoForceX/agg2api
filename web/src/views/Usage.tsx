@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { COPY } from "../lib/copy.ts"
-import { formatCompact, formatCost, formatDateTime, formatInt, formatMs } from "../lib/format.ts"
+import { formatCompact, formatCost, formatDateTime, formatInt, formatBucket, formatMs } from "../lib/format.ts"
 import { parseUsageLog } from "../lib/log.ts"
 import { WINDOWS, useAdminConfig, useUsage, useUsageLog } from "../lib/queries.ts"
 import type { UsageLogRow } from "../lib/types.ts"
@@ -89,7 +89,7 @@ export function UsageView() {
 
       <Card
         title={COPY.usage.totalsLast(selected.label)}
-        subtitle={COPY.usage.bucketEvery(formatMs(selected.bucketMs))}
+        subtitle={COPY.usage.bucketEvery(formatBucket(selected.bucketMs))}
         padded
       >
         {usage.isPending ? (
@@ -115,8 +115,8 @@ export function UsageView() {
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} />
             </div>
-            <h3 className="section-title">{COPY.usage.requestsOverTime}</h3>
-            <BarChart points={usage.data?.series ?? []} label={COPY.usage.chartLabel(selected.label)} />
+            <h3 className="section-title">{COPY.chart.requestsOverTime}</h3>
+            <BarChart points={usage.data?.series ?? []} label={COPY.chart.label(selected.label)} />
           </>
         )}
       </Card>

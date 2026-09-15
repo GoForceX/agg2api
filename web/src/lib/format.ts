@@ -26,6 +26,25 @@ export function formatCompact(value: number | null | undefined): string {
   return `${(value / 1_000_000).toFixed(abs < 10_000_000 ? 1 : 0)}M`
 }
 
+/**
+ * A credit balance.
+ *
+ * Deliberately not `formatCompact`: that is a token-count formatter and rounds to whole
+ * numbers, so a fractional balance was displayed as a different number — 10.5 as "11",
+ * 4.25 as "4", and anything under 0.5 as "0", which reads as an exhausted account.
+ * Balances are small decimal quantities, so they keep their decimals and only go
+ * compact once they are genuinely large.
+ */
+export function formatCredits(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return DASH
+  const abs = Math.abs(value)
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (abs >= 100_000) return `${(value / 1000).toFixed(0)}k`
+  if (abs >= 1000) return `${(value / 1000).toFixed(1)}k`
+  // Up to two decimals, trailing zeros dropped: 10.5 stays 10.5, 10.25 stays 10.25.
+  return value.toFixed(2).replace(/\.?0+$/, "") || "0"
+}
+
 export function formatCost(value: number | null | undefined, currency?: string): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return DASH
   const abs = Math.abs(value)
@@ -39,6 +58,22 @@ export function formatMs(value: number | null | undefined): string {
   if (value <= 0) return DASH
   if (value < 1000) return `${Math.round(value)} 毫秒`
   return `${(value / 1000).toFixed(value < 10_000 ? 2 : 1)} 秒`
+}
+
+/**
+ * A bucket width, in the units an operator reads charts in.
+ *
+ * `formatMs` is for latencies, where seconds is the right unit; a 30-minute bucket
+ * rendered through it as "1800.0 秒", which is a duration nobody wants to convert in
+ * their head. This picks the coarsest exact unit instead.
+ */
+export function formatBucket(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) return DASH
+  if (ms % 86_400_000 === 0) return `${ms / 86_400_000} 天`
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000} 小时`
+  if (ms % 60_000 === 0) return `${ms / 60_000} 分钟`
+  if (ms % 1000 === 0) return `${ms / 1000} 秒`
+  return `${Math.round(ms)} 毫秒`
 }
 
 export function formatDuration(seconds: number | null | undefined): string {

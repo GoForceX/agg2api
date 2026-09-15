@@ -23,9 +23,14 @@ export const workbuddyAdapter: Adapter = chatCompletion("workbuddy2api")
 /**
  * Read the pool's credit snapshot.
  *
- * `total` and `healthy` are taken from the payload when it states them; older
- * builds report only the per-account rows, so they are then derived — the sum of
- * balances, and the count of accounts that are neither cooling nor disabled.
+ * The pool's balance is the sum of its per-account balances, and its healthy count is
+ * the number of accounts that are neither cooling nor disabled. Those are always derived
+ * from the rows rather than read from the payload's own `total` / `healthy` fields:
+ * workbuddy2api uses `total` for the *number of accounts in the pool*, so trusting it
+ * reported a two-account pool holding 7032 credits as "2".
+ *
+ * The payload's own figures are used only when it names no accounts at all, which is
+ * how a build that states a balance and no rows still works.
  */
 export const fetchCredits = (
   provider: Provider
@@ -60,9 +65,11 @@ export const fetchCredits = (
 
     return {
       provider_id: provider.id,
-      total: total ?? accounts.reduce((sum, account) => sum + account.credits, 0),
+      total: accounts.length > 0 ? accounts.reduce((sum, account) => sum + account.credits, 0) : (total ?? 0),
       healthy:
-        healthy ?? accounts.filter((account) => account.cooling !== true && account.disabled !== true).length,
+        accounts.length > 0
+          ? accounts.filter((account) => account.cooling !== true && account.disabled !== true).length
+          : (healthy ?? 0),
       accounts,
       fetched_at: Date.now(),
       // Adapters never invent a partial failure: anything short of a complete

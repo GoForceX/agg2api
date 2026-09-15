@@ -127,28 +127,24 @@ export function RoutesView() {
   return (
     <div className="stack">
       <div className="view-head">
-        <h1>Routes</h1>
+        <h1>{COPY.routes.title}</h1>
         <div className="row-actions">
           <button type="button" className="btn" disabled={sync.isPending} onClick={() => sync.mutate()}>
-            {sync.isPending ? "Syncing…" : "Sync from discovery"}
+            {sync.isPending ? COPY.action.syncing : COPY.action.sync}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-            New route
+            {COPY.routes.add}
           </button>
         </div>
       </div>
 
       {notice !== null ? <Banner message={notice} onDismiss={() => setNotice(null)} /> : null}
 
-      <p className="muted small">
-        Gateway default strategy is <strong>{defaultStrategy}</strong>; routes set to <em>inherit</em> follow it.
-        Under <em>priority</em> the highest-priority enabled target serves every request; under <em>weighted</em> the
-        priority acts as a weight, so any enabled target may win.
-      </p>
+      <p className="muted small">{COPY.routes.strategyLegend(COPY.strategies[defaultStrategy])}</p>
 
       {config.data.routes.length === 0 ? (
         <Card>
-          <p className="muted padded">No routes yet. Sync from discovery or add one by hand.</p>
+          <p className="muted padded">{COPY.routes.empty}</p>
         </Card>
       ) : null}
 
@@ -166,7 +162,7 @@ export function RoutesView() {
 
       {creating ? (
         <RouteForm
-          title="New route"
+          title={COPY.routes.add}
           draft={EMPTY_ROUTE}
           providers={providers}
           onClose={() => setCreating(false)}
@@ -179,7 +175,7 @@ export function RoutesView() {
 
       {editing !== null ? (
         <RouteForm
-          title={`Edit ${editing.public_model}`}
+          title={COPY.routes.editTitle(editing.public_model)}
           draft={routeToDraft(editing)}
           providers={providers}
           existing
@@ -217,29 +213,44 @@ function RouteCard({
   return (
     <Card
       title={route.display_name !== null && route.display_name.length > 0 ? route.display_name : route.public_model}
-      subtitle={`${route.public_model} · ${route.targets.length} target${route.targets.length === 1 ? "" : "s"} · updated ${formatDateTime(route.updated_at)}`}
+      subtitle={COPY.routes.cardSubtitle(
+        route.public_model,
+        route.targets.length,
+        formatDateTime(route.updated_at)
+      )}
       actions={
         <>
-          <Toggle checked={route.enabled} label="Enabled" onChange={onToggleEnabled} />
+          <Toggle checked={route.enabled} label={COPY.field.enabled} onChange={onToggleEnabled} />
           <button type="button" className="btn btn-small" onClick={onEdit}>
-            Edit
+            {COPY.action.edit}
           </button>
-          <ConfirmButton onConfirm={onDelete} label="Delete" confirmLabel="Confirm delete" />
+          <ConfirmButton
+            onConfirm={onDelete}
+            label={COPY.action.delete}
+            confirmLabel={COPY.action.confirmDelete}
+          />
         </>
       }
       padded
     >
       <div className="route-meta">
         <span>
-          Strategy <Badge tone={route.strategy === null ? "neutral" : "info"}>{STRATEGY_LABEL[route.strategy ?? "inherit"]}</Badge>
+          {COPY.column.strategy}{" "}
+          <Badge tone={route.strategy === null ? "neutral" : "info"}>
+            {STRATEGY_LABEL[route.strategy ?? "inherit"]}
+          </Badge>
         </span>
-        {route.strategy === null ? <span className="muted small">resolves to {defaultStrategy}</span> : null}
+        {route.strategy === null ? (
+          <span className="muted small">{COPY.routes.resolvedTo(COPY.strategies[defaultStrategy])}</span>
+        ) : null}
         <span className="muted small">
           {effective === "priority"
             ? serving === null
-              ? "no enabled target — the route will 404"
-              : `serving via ${providerName(serving.provider_id)} → ${serving.upstream_model}`
-            : `${route.targets.filter((target) => target.enabled).length} eligible targets, weighted by priority`}
+              ? COPY.routes.noTargets
+              : COPY.routes.servingVia(providerName(serving.provider_id), serving.upstream_model)
+            : COPY.routes.weightedEligible(
+                route.targets.filter((target) => target.enabled).length
+              )}
         </span>
       </div>
 
@@ -247,18 +258,18 @@ function RouteCard({
         <table>
           <thead>
             <tr>
-              <th>Preferred</th>
-              <th>Provider</th>
-              <th>Upstream model</th>
-              <th className="num">Priority</th>
-              <th>Enabled</th>
+              <th>{COPY.routes.preferredColumn}</th>
+              <th>{COPY.column.provider}</th>
+              <th>{COPY.field.upstreamModel}</th>
+              <th className="num">{COPY.field.priority}</th>
+              <th>{COPY.field.enabled}</th>
             </tr>
           </thead>
           <tbody>
             {route.targets.length === 0 ? (
               <tr>
                 <td className="empty" colSpan={5}>
-                  No targets.
+                  {COPY.routes.targetsEmpty}
                 </td>
               </tr>
             ) : null}
@@ -266,11 +277,19 @@ function RouteCard({
               const isServing = effective === "priority" && index === preferred
               return (
                 <tr key={`${target.provider_id}-${target.upstream_model}-${index}`}>
-                  <td>{isServing ? <Badge tone="good">serving</Badge> : <span className="muted">—</span>}</td>
+                  <td>
+                    {isServing ? <Badge tone="good">{COPY.routes.serving}</Badge> : <span className="muted">—</span>}
+                  </td>
                   <td>{providerName(target.provider_id)}</td>
                   <td className="mono small">{target.upstream_model}</td>
                   <td className="num">{formatInt(target.priority)}</td>
-                  <td>{target.enabled ? <Badge tone="good">yes</Badge> : <Badge tone="neutral">no</Badge>}</td>
+                  <td>
+                    {target.enabled ? (
+                      <Badge tone="good">{COPY.state.yes}</Badge>
+                    ) : (
+                      <Badge tone="neutral">{COPY.state.no}</Badge>
+                    )}
+                  </td>
                 </tr>
               )
             })}
@@ -304,7 +323,7 @@ function RouteForm({
   const save = useMutation({
     mutationFn: async () => {
       const publicModel = form.public_model.trim()
-      if (publicModel.length === 0) throw new Error("Public model is required")
+      if (publicModel.length === 0) throw new Error(COPY.validation.modelRequired)
       const input: RouteInput = {
         public_model: publicModel,
         strategy: form.strategy === "inherit" ? null : form.strategy,
@@ -326,10 +345,10 @@ function RouteForm({
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {COPY.action.cancel}
           </button>
           <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : existing === true ? "Save" : "Create"}
+            {save.isPending ? COPY.action.saving : existing === true ? COPY.action.save : COPY.action.create}
           </button>
         </>
       }
@@ -337,7 +356,7 @@ function RouteForm({
       {error !== null ? <Banner tone="bad" message={error} onDismiss={() => setError(null)} /> : null}
 
       <div className="form-grid">
-        <Field label="Public model" hint="The id clients send, e.g. gpt-4o">
+        <Field label={COPY.field.publicModel} hint={COPY.routes.publicModelHint}>
           <input
             className="input mono"
             value={form.public_model}
@@ -347,7 +366,7 @@ function RouteForm({
           />
         </Field>
 
-        <Field label="Display name" hint="Optional label shown in this console">
+        <Field label={COPY.routes.displayName} hint={COPY.routes.displayNameHint}>
           <input
             className="input"
             value={form.display_name}
@@ -355,24 +374,24 @@ function RouteForm({
           />
         </Field>
 
-        <Field label="Strategy">
+        <Field label={COPY.field.strategy} hint={COPY.routes.targetsHint}>
           <select
             className="input"
             value={form.strategy}
             onChange={(event) => patch({ strategy: event.currentTarget.value as StrategyChoice })}
           >
-            <option value="inherit">inherit default</option>
-            <option value="priority">priority</option>
-            <option value="weighted">weighted</option>
+            <option value="inherit">{COPY.routes.inherit}</option>
+            <option value="priority">{COPY.strategies.priority}</option>
+            <option value="weighted">{COPY.strategies.weighted}</option>
           </select>
         </Field>
 
         <div className="form-span">
-          <Toggle checked={form.enabled} label="Enabled" onChange={(enabled) => patch({ enabled })} />
+          <Toggle checked={form.enabled} label={COPY.field.enabled} onChange={(enabled) => patch({ enabled })} />
         </div>
       </div>
 
-      <h3 className="section-title">Targets</h3>
+      <h3 className="section-title">{COPY.field.targets}</h3>
       <TargetEditor targets={form.targets} providers={providers} onChange={(targets) => patch({ targets })} />
     </Modal>
   )
@@ -394,7 +413,7 @@ function TargetEditor({
   return (
     <div className="stack">
       {targets.length === 0 ? (
-        <p className="muted small">No targets. A route without targets returns 404 for that model.</p>
+        <p className="muted small">{COPY.routes.targetsEmptyHint}</p>
       ) : null}
       {targets.map((target, index) => {
         const selected = providers.find((detail) => String(detail.provider.id) === target.provider_id)
@@ -407,11 +426,11 @@ function TargetEditor({
               value={target.provider_id}
               onChange={(event) => update(index, { provider_id: event.currentTarget.value, upstream_model: "" })}
             >
-              <option value="">select provider</option>
+              <option value="">{COPY.routes.selectProvider}</option>
               {providers.map((detail) => (
                 <option key={detail.provider.id} value={String(detail.provider.id)}>
                   {detail.provider.name}
-                  {detail.provider.enabled ? "" : " (disabled)"}
+                  {detail.provider.enabled ? "" : COPY.routes.disabledSuffix}
                 </option>
               ))}
             </select>
@@ -423,11 +442,15 @@ function TargetEditor({
               onChange={(event) => update(index, { upstream_model: event.currentTarget.value })}
             >
               <option value="">
-                {selected === undefined ? "select a provider first" : models.length === 0 ? "no discovered models" : "select model"}
+                {selected === undefined
+                  ? COPY.routes.selectProviderFirst
+                  : models.length === 0
+                    ? COPY.routes.noDiscoveredModels
+                    : COPY.routes.selectModel}
               </option>
               {/* Preserve a value that discovery no longer reports so editing never silently drops it. */}
               {target.upstream_model.length > 0 && !upstreamKnown ? (
-                <option value={target.upstream_model}>{target.upstream_model} (not discovered)</option>
+                <option value={target.upstream_model}>{COPY.routes.notDiscovered(target.upstream_model)}</option>
               ) : null}
               {models.map((model) => (
                 <option key={model.upstream_id} value={model.upstream_id}>
@@ -441,20 +464,20 @@ function TargetEditor({
               className="input"
               type="number"
               value={target.priority}
-              aria-label="Priority"
+              aria-label={COPY.field.priority}
               onChange={(event) => update(index, { priority: event.currentTarget.value })}
             />
 
             <Toggle
               checked={target.enabled}
-              label="On"
+              label={COPY.field.enabled}
               onChange={(enabled) => update(index, { enabled })}
             />
 
             <button
               type="button"
               className="icon-btn"
-              aria-label="Remove target"
+              aria-label={COPY.routes.removeTarget}
               onClick={() => onChange(targets.filter((_, at) => at !== index))}
             >
               ✕
@@ -467,7 +490,7 @@ function TargetEditor({
         className="btn btn-small"
         onClick={() => onChange([...targets, { provider_id: "", upstream_model: "", priority: "0", enabled: true }])}
       >
-        Add target
+        {COPY.routes.addTarget}
       </button>
     </div>
   )

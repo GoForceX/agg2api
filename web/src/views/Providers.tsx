@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api, errorMessage } from "../lib/api.ts"
 import { COPY } from "../lib/copy.ts"
-import { breakerLabel, formatCompact, formatDateTime, formatInt, formatMs } from "../lib/format.ts"
+import { breakerLabel, formatCredits, formatDateTime, formatInt, formatMs } from "../lib/format.ts"
 import {
   EMPTY_PROVIDER,
   draftToInput,
@@ -174,7 +174,7 @@ export function ProvidersView() {
                 <th className="num">{COPY.field.models}</th>
                 <th>{COPY.providers.credits}</th>
                 <th>{COPY.providers.breaker}</th>
-                <th>{COPY.providers.actions}</th>
+                <th>{COPY.column.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -297,7 +297,7 @@ function ProviderRow({
         <td>
           {isWorkbuddy ? (
             <div className="cell-stack">
-              <span>{credits === null ? "—" : formatCompact(credits.total)}</span>
+              <span>{credits === null ? "—" : formatCredits(credits.total)}</span>
               {credits !== null ? (
                 <span className="muted small">
                   {COPY.providers.healthyAccounts(credits.healthy)}
@@ -364,7 +364,7 @@ function ProviderRow({
                 <div className="stat-grid">
                   <div className="stat">
                     <span className="stat-label">{COPY.providers.creditsTotal}</span>
-                    <span className="stat-value">{formatCompact(credits.total)}</span>
+                    <span className="stat-value">{formatCredits(credits.total)}</span>
                   </div>
                   <div className="stat">
                     <span className="stat-label">{COPY.providers.healthyAccountsLabel}</span>
@@ -399,7 +399,7 @@ function ProviderRow({
                           <td className="mono small">{account.uid}</td>
                           <td>{account.nickname ?? "—"}</td>
                           <td>{account.realm ?? "—"}</td>
-                          <td className="num">{formatCompact(account.credits)}</td>
+                          <td className="num">{formatCredits(account.credits)}</td>
                           <td>
                             {account.disabled === true ? (
                               <Badge tone="bad">{account.disabled_reason ?? COPY.providers.disabled}</Badge>

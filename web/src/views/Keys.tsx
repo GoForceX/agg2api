@@ -96,7 +96,7 @@ export function KeysView() {
                 <th>{COPY.field.allowedModels}</th>
                 <th className="num">{COPY.keys.totalRequests}</th>
                 <th>{COPY.keys.lastUsed}</th>
-                <th>{COPY.keys.actions}</th>
+                <th>{COPY.column.actions}</th>
               </tr>
             </thead>
             <tbody>

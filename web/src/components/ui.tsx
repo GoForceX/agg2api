@@ -206,7 +206,7 @@ export function Banner({
     <div className={`banner banner-${tone}`} role="status">
       <span>{message}</span>
       {onDismiss !== undefined ? (
-        <button type="button" className="icon-btn" aria-label="Dismiss" onClick={onDismiss}>
+        <button type="button" className="icon-btn" aria-label={COPY.action.dismiss} onClick={onDismiss}>
           ✕
         </button>
       ) : null}
@@ -220,7 +220,7 @@ export function ErrorPanel({ error, onRetry }: { error: unknown; onRetry?: () =>
       <span>{errorMessage(error)}</span>
       {onRetry !== undefined ? (
         <button type="button" className="btn" onClick={onRetry}>
-          Retry
+          {COPY.action.retry}
         </button>
       ) : null}
     </div>
@@ -271,7 +271,7 @@ export function PairEditor({
           <button
             type="button"
             className="icon-btn"
-            aria-label={`Remove ${entry.key.length > 0 ? entry.key : "row"}`}
+            aria-label={COPY.action.removeEntry(entry.key.length > 0 ? entry.key : COPY.state.unknown)}
             onClick={() => onChange(entries.filter((_, at) => at !== index))}
           >
             ✕
@@ -279,7 +279,7 @@ export function PairEditor({
         </div>
       ))}
       <button type="button" className="btn btn-small" onClick={() => onChange([...entries, { key: "", value: "" }])}>
-        Add entry
+        {COPY.action.addEntry}
       </button>
     </div>
   )
@@ -302,17 +302,17 @@ export function Pagination({
   return (
     <div className="pagination">
       <span className="muted small">
-        {first}–{last} of {total}
+        {COPY.pager.range(first, last, total)}
       </span>
       <div className="row-actions">
         <button type="button" className="btn btn-small" disabled={page === 0} onClick={() => onPage(page - 1)}>
-          Previous
+          {COPY.action.previous}
         </button>
         <span className="muted small">
-          page {page + 1} / {pages}
+          {COPY.pager.pageOf(page + 1, pages)}
         </span>
         <button type="button" className="btn btn-small" disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>
-          Next
+          {COPY.action.next}
         </button>
       </div>
     </div>

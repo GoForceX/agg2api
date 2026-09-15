@@ -417,23 +417,40 @@ describe("fetchCredits", () => {
     }
   })
 
-  test("reads a snapshot nested under data and trusts reported totals", async () => {
+  test("reads a snapshot nested under data and derives the totals from the rows", async () => {
+    // The payload's own `total` is the *number of accounts in the pool*, not a balance,
+    // so it must not be read as one: doing so reported a two-account pool holding 7032
+    // credits as "2". `healthy` is derived for the same reason.
     const mock = serve(() =>
       json({
         data: {
-          accounts: [{ uid: "u1", credits: 1 }],
-          total: 99,
-          healthy: 0,
-          disabled: true
+          accounts: [
+            { uid: "u1", credits: 2256 },
+            { uid: "u2", credits: 4776, cooling: true }
+          ],
+          total: 2,
+          healthy: 2
         }
       })
     )
     try {
       const credits = await run(fetchCredits(provider(mock.port, { kind: "workbuddy2api" })))
 
-      expect(credits.total).toBe(99)
-      expect(credits.healthy).toBe(0)
-      expect(credits.accounts).toHaveLength(1)
+      expect(credits.total).toBe(7032)
+      expect(credits.healthy).toBe(1)
+      expect(credits.accounts).toHaveLength(2)
+    } finally {
+      await mock.stop()
+    }
+  })
+
+  test("falls back to the payload's own figures when it lists no accounts", async () => {
+    // A build that states a balance and no rows is still usable.
+    const mock = serve(() => json({ accounts: [], total: 500, healthy: 3 }))
+    try {
+      const credits = await run(fetchCredits(provider(mock.port, { kind: "workbuddy2api" })))
+      expect(credits.total).toBe(500)
+      expect(credits.healthy).toBe(3)
     } finally {
       await mock.stop()
     }

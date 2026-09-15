@@ -1,5 +1,5 @@
 import { COPY } from "../lib/copy.ts"
-import { formatCompact, formatCost, formatDuration, formatInt, formatMs, formatPercent } from "../lib/format.ts"
+import { formatCredits, formatCompact, formatCost, formatDuration, formatInt, formatMs, formatPercent } from "../lib/format.ts"
 import { DEFAULT_WINDOW, useOverview, useUsage } from "../lib/queries.ts"
 import type { UsageAggregate } from "../lib/types.ts"
 import { BarChart } from "../components/BarChart.tsx"
@@ -38,7 +38,7 @@ export function DashboardView() {
         <Stat label={COPY.dashboard.keys} value={formatInt(data.keys)} hint={COPY.dashboard.keysHint} />
         <Stat
           label={COPY.dashboard.credits}
-          value={formatCompact(data.credits_total)}
+          value={formatCredits(data.credits_total)}
           hint={COPY.dashboard.creditsHint}
           tone={data.credits_total <= 0 ? "warn" : undefined}
         />
@@ -108,8 +108,8 @@ export function DashboardView() {
               </p>
             </div>
 
-            <h3 className="section-title">{COPY.dashboard.requestsOverTime}</h3>
-            <BarChart points={series} label={COPY.dashboard.chartLabel(DEFAULT_WINDOW.label)} />
+            <h3 className="section-title">{COPY.chart.requestsOverTime}</h3>
+            <BarChart points={series} label={COPY.chart.label(DEFAULT_WINDOW.label)} />
           </>
         )}
       </Card>

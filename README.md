@@ -206,6 +206,13 @@ endpoint and shows the **total remaining credits** and the **per-account
 breakdown** (nickname, realm, cooling, disabled) on the dashboard, refreshing them
 alongside discovery.
 
+The pool's total is **summed from the per-account balances**, and the healthy count
+is the number of accounts that are neither cooling nor disabled. workbuddy2api's own
+`total` / `healthy` fields are counts of accounts, not balances, so they are not
+trusted when rows are present — reading `total` as a balance showed a two-account
+pool holding 7032 credits as "2". They are used only when a build reports a balance
+with no account rows.
+
 A failed refresh stores the error next to the last known figures rather than
 blanking them, so stale numbers are visible as stale.
 
