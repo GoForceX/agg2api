@@ -170,6 +170,31 @@ export const fromUpstreamResponse = (raw: unknown, fallbackModel: string): Chat.
 }
 
 /**
+ * Detect a failure the provider reports *inside* the stream.
+ *
+ * A provider cannot report a mid-generation failure by status — the 200 and its headers
+ * went out with the first chunk — so the ones that do not simply drop the connection
+ * send `{"error": {...}}` as a final SSE frame instead. That frame carries no choices, so
+ * the chunk converter drops it as "nothing to forward", and the client is left with
+ * partial text followed by a clean terminator reading as a complete response.
+ *
+ * The Anthropic and Responses paths already surface their equivalent
+ * (`response.failed`/`response.error`); this is the chat path's missing half.
+ */
+export const inBandErrorOf = (raw: unknown): { message: string; body: unknown } | null => {
+  if (!isRecord(raw)) return null
+  const error = raw.error
+  if (!isRecord(error)) return null
+  const message = typeof error.message === "string" && error.message !== "" ? error.message : null
+  const code = typeof error.code === "string" ? error.code : null
+  const type = typeof error.type === "string" ? error.type : null
+  // Plain `error` objects are how OpenAI-shaped providers report every failure in this
+  // position, so any non-empty envelope is treated as one rather than guessing at codes.
+  const detail = message ?? code ?? type ?? "upstream reported an error"
+  return { message: detail, body: raw }
+}
+
+/**
  * Convert one upstream OpenAI chat chunk into canonical form.
  *
  * Returns `null` for chunks that carry nothing the gateway forwards — notably the

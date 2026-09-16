@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import type * as Chat from "../canonical.ts"
-import type { ProviderAttempt, ProviderKind, RoutingStrategy } from "../domain.ts"
+import { MAX_RETRIES, type ProviderAttempt, type ProviderKind, type RoutingStrategy } from "../domain.ts"
 import { ProviderError, RoutingError, providerError } from "../errors.ts"
 import type { Adapter, Completion, ProviderStream, Target } from "../upstream/adapter.ts"
 import { openaiChatAdapter } from "../upstream/chat-adapter.ts"
@@ -217,7 +217,12 @@ const attemptWithRetries = <A>(
     const sql = yield* SqlClient.SqlClient
     const target = candidate.target
     const attempts: Attempt[] = []
-    const extra = Math.max(0, target.provider.max_retries)
+    // Clamped as well as validated: the schema protects the admin API, and this protects
+    // a row written before that bound existed, or by hand. A non-finite or huge value here
+    // is an unterminating loop, not a misconfiguration, so it cannot be left to the schema.
+    const extra = Number.isFinite(target.provider.max_retries)
+      ? Math.min(MAX_RETRIES, Math.max(0, Math.floor(target.provider.max_retries)))
+      : 0
 
     let last: ProviderError | null = null
     for (let tryIndex = 0; tryIndex <= extra; tryIndex += 1) {
@@ -261,12 +266,20 @@ const attemptWithRetries = <A>(
       // A malformed request is malformed at every provider, so retrying is pure
       // waste. Surfaced immediately instead of after exhausting the candidates.
       //
-      // Deliberately not recorded as a provider failure: the request was rejected
-      // because the *caller* sent it wrong, so the provider answered correctly. Writing
-      // it to the breaker would let one caller's bad body remove a healthy provider for
-      // every other caller — and /v1 admits anonymous callers by default, so it could be
-      // renewed indefinitely. The attempt still reaches the usage log via `attempts`.
-      if (failure.kind === "invalid_request") {
+      // `not_found` is grouped here for the same reason `invalid_request` is, and the
+      // caller controls both: the model name comes straight from the request body, so an
+      // anonymous caller naming one model this provider does not host would otherwise
+      // trip its breaker — and the breaker is per *provider*, not per model, so that
+      // removes a perfectly healthy upstream from every other route for the cooldown.
+      // Measured before the fix: three requests for one unsupported model took a
+      // provider out of rotation, and the next request for a model it *does* host was
+      // served by the fallback.
+      //
+      // Deliberately not recorded as a provider failure: the provider answered
+      // correctly. The attempt still reaches the usage log via `attempts`, and failover
+      // to the next candidate is unaffected because `walk` continues on any
+      // non-aborted error.
+      if (failure.kind === "invalid_request" || failure.kind === "not_found") {
         return { ok: false, error: failure, attempts }
       }
 

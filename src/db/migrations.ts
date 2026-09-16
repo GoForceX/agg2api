@@ -156,5 +156,31 @@ export const migrations: ReadonlyArray<Migration> = [
       // reader would have to find out which one is authoritative.
       `ALTER TABLE provider_models DROP COLUMN supports_images`
     ]
+  },
+  {
+    id: 3,
+    name: "bound_max_retries",
+    statements: [
+      // The admin API now validates this, but a database is editable by hand and may
+      // predate the bound. `0` also covers the rows the ALTER cannot rewrite, and the
+      // executor clamps independently — three places, because the failure mode is a loop
+      // that never ends rather than a wrong value.
+      `UPDATE providers SET max_retries = 0 WHERE max_retries < 0 OR max_retries > 10 OR max_retries != CAST(max_retries AS INTEGER)`
+    ]
+  },
+  {
+    id: 4,
+    name: "route_provenance",
+    statements: [
+      // Which routes `routes/sync` owns. It previously inferred this from the target
+      // count, but sync itself creates multi-target routes when several providers serve
+      // one model — so its own output was mistaken for operator curation and could never
+      // be reconciled again, leaving retired models routable forever.
+      //
+      // Existing routes default to operator-owned: the safe direction, because treating a
+      // curated route as automatic would discard the operator's work. A route sync owns
+      // is recognised again on the next sync that changes it.
+      `ALTER TABLE routes ADD COLUMN auto INTEGER NOT NULL DEFAULT 0`
+    ]
   }
 ]

@@ -287,11 +287,17 @@ export const syncRoutes = (): Effect.Effect<
 
     for (const [publicModel, targets] of wanted) {
       const route = byModel.get(publicModel)
-      const isAutoManaged = route === undefined || route.targets.length <= 1
+      // Ownership is recorded, not guessed from the target count. sync creates
+      // multi-target routes itself when several providers serve one model, so a
+      // count-based test classified its own output as operator-curated and stopped
+      // reconciling it — a retired model stayed routable forever. A route the operator
+      // built is `auto: false` and is never touched.
+      const isAutoManaged = route === undefined || route.auto
 
       if (route === undefined) {
         yield* createRoute(sql, {
           public_model: publicModel,
+          auto: true,
           // Inherit the gateway strategy: an operator who wants weighted routing
           // sets it globally or overrides the routes they care about.
           strategy: null,
@@ -323,6 +329,7 @@ export const syncRoutes = (): Effect.Effect<
 
       yield* createRoute(sql, {
         public_model: publicModel,
+        auto: true,
         strategy: route.strategy,
         enabled: route.enabled,
         display_name: route.display_name,
@@ -333,9 +340,10 @@ export const syncRoutes = (): Effect.Effect<
 
     for (const route of existing) {
       if (wanted.has(route.public_model)) continue
-      // Preserve a route the operator built by hand even if discovery no longer
-      // sees the model; they may be pointing at an upstream we cannot enumerate.
-      if (route.targets.length > 1) continue
+      // Preserve a route the operator built by hand even if discovery no longer sees the
+      // model; they may be pointing at an upstream we cannot enumerate. Only a route sync
+      // itself created is ever removed.
+      if (!route.auto) continue
       yield* sql`DELETE FROM routes WHERE public_model = ${route.public_model}`.pipe(Effect.orDie)
       removed.push(route.public_model)
     }

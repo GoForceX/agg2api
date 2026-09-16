@@ -8,6 +8,17 @@
 import * as Schema from "effect/Schema"
 import { ModelCapabilities } from "./models/capabilities.ts"
 
+/**
+ * Extra in-provider attempts, bounded at both ends.
+ *
+ * Unbounded, this is a denial-of-service on the gateway's own host: the retry loop
+ * terminates only when the provider stops failing, and a 503 without `Retry-After`
+ * retries with no delay at all, so one client request can issue thousands of upstream
+ * calls. Ten is far above any useful setting — the retry exists to absorb a blip, and a
+ * provider that has failed ten times in a row is not having a blip.
+ */
+export const MAX_RETRIES = 10
+
 /** Upstream protocol family. */
 export const ProviderKind = Schema.Literal("openai-chat", "openai-responses", "workbuddy2api")
 export type ProviderKind = typeof ProviderKind.Type
@@ -46,7 +57,7 @@ export const Provider = Schema.Struct({
    * Extra in-provider attempts on a retryable failure before the router moves on.
    * `0` (default) fails over to the next provider immediately.
    */
-  max_retries: Schema.Number,
+  max_retries: Schema.Int.pipe(Schema.between(0, MAX_RETRIES)),
   created_at: Schema.Number,
   updated_at: Schema.Number
 })
@@ -67,7 +78,7 @@ export const ProviderInput = Schema.Struct({
   input_price: Schema.optional(Schema.NullOr(Schema.Number)),
   output_price: Schema.optional(Schema.NullOr(Schema.Number)),
   currency: Schema.optional(Schema.String),
-  max_retries: Schema.optional(Schema.Number)
+  max_retries: Schema.optional(Schema.Int.pipe(Schema.between(0, MAX_RETRIES)))
 })
 export type ProviderInput = typeof ProviderInput.Type
 
@@ -174,6 +185,16 @@ export const Route = Schema.Struct({
   strategy: Schema.NullOr(RoutingStrategy),
   enabled: Schema.Boolean,
   display_name: Schema.NullOr(Schema.String),
+  /**
+   * Whether `routes/sync` owns this route.
+   *
+   * Explicit rather than inferred from the target count: sync creates multi-target
+   * routes itself when several providers serve one model, so a count-based test
+   * reclassified its own output as operator-curated and stopped reconciling it.
+   * An operator editing a route through the admin API clears this, handing ownership
+   * back to them.
+   */
+  auto: Schema.Boolean,
   targets: Schema.Array(RouteTarget),
   created_at: Schema.Number,
   updated_at: Schema.Number
@@ -182,6 +203,8 @@ export type Route = typeof Route.Type
 
 export const RouteInput = Schema.Struct({
   public_model: Schema.String,
+  /** Set by `routes/sync`; absent from operator input, which always clears it. */
+  auto: Schema.optional(Schema.Boolean),
   strategy: Schema.optional(Schema.NullOr(RoutingStrategy)),
   enabled: Schema.optional(Schema.Boolean),
   display_name: Schema.optional(Schema.NullOr(Schema.String)),

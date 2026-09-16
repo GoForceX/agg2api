@@ -16,11 +16,11 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type * as Chat from "../canonical.ts"
 import type { Provider } from "../domain.ts"
-import type { ProviderError } from "../errors.ts"
+import { providerError, type ProviderError } from "../errors.ts"
 import { asBoolean, asNumber, asRecordArray, asString, isRecord } from "../json.ts"
 import type { Adapter, UpstreamModel } from "./adapter.ts"
 import { decodeJson, execute, KIND_PATHS, postJson, transportFailure, url } from "./http.ts"
-import { fromUpstreamChunk, fromUpstreamResponse, toUpstreamBody } from "./openai-chat.ts"
+import { fromUpstreamChunk, fromUpstreamResponse, inBandErrorOf, toUpstreamBody } from "./openai-chat.ts"
 import * as sse from "./sse.ts"
 
 const MODELS_PATH = "/v1/models"
@@ -156,7 +156,26 @@ export const chatCompletion = (kind: "openai-chat" | "workbuddy2api"): Adapter =
       const chunks = response.stream.pipe(
         sse.parse,
         sse.decode,
-        Stream.map((raw) => fromUpstreamChunk(raw, model)),
+        // Failure detection comes *before* conversion: an error frame carries no choices,
+        // so the converter would return null and the filter below would discard it —
+        // leaving the client a truncated 200 with a clean terminator.
+        Stream.mapEffect((raw) => {
+          const failure = inBandErrorOf(raw)
+          if (failure !== null) {
+            return Effect.fail(
+              providerError({
+                provider_id: provider.id,
+                provider_name: provider.name,
+                kind: "upstream",
+                // The request itself succeeded; the failure is inside the response body.
+                status: 200,
+                message: failure.message,
+                body: JSON.stringify(failure.body)
+              })
+            )
+          }
+          return Effect.succeed(fromUpstreamChunk(raw, model))
+        }),
         Stream.filter((chunk): chunk is Chat.Chunk => chunk !== null),
         Stream.mapError((cause) => transportFailure(provider, cause))
       )

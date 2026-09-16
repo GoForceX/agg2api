@@ -13,7 +13,7 @@ import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Effect from "effect/Effect"
 import type { Provider, ProviderKind } from "../domain.ts"
-import { providerError, type ProviderError, type ProviderErrorKind } from "../errors.ts"
+import { ProviderError, providerError, type ProviderErrorKind } from "../errors.ts"
 
 /** Join a provider base URL with a path, tolerating either side's slashes. */
 export const url = (base: string, path: string): string =>
@@ -105,6 +105,11 @@ export const errorMessageFrom = (body: string, fallback: string): string => {
  * left" from "the provider stalled".
  */
 export const transportFailure = (provider: Provider, cause: unknown): ProviderError => {
+  // An already-classified ProviderError is passed through rather than re-labelled. This
+  // mapping is applied to a stream's whole error channel, so without this an error the
+  // adapter raised deliberately — a failure the provider reported in-band, which carries
+  // the upstream's own reason and a meaningful `kind` — would be rewritten as `network`.
+  if (cause instanceof ProviderError) return cause
   const message = cause instanceof Error ? cause.message : String(cause)
   const name = cause instanceof Error ? cause.name : ""
   const kind: ProviderErrorKind =

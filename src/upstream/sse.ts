@@ -102,13 +102,28 @@ export const namedBody = <E>(
 
 const encoder = new TextEncoder()
 
-/** Encode framed payloads as the byte stream an HTTP response body needs. */
-export const encode = <E>(payloads: Stream.Stream<string, E>): Stream.Stream<Uint8Array, E> =>
+/**
+ * Encode framed payloads as the byte stream an HTTP response body needs.
+ *
+ * `terminate` is read *after* the upstream stream ends, not before: a handler that
+ * converted a failure into a final error frame does so via `catchAll`, which makes the
+ * stream complete successfully — so an unconditional terminator would be appended after
+ * that error frame and tell the client a truncated response finished normally. The
+ * Anthropic path never had this problem because it appends nothing.
+ */
+export const encode = <E>(
+  payloads: Stream.Stream<string, E>,
+  terminate: () => boolean = () => true
+): Stream.Stream<Uint8Array, E> =>
   payloads.pipe(
     Stream.map((payload) => encoder.encode(frame(payload))),
     // Append the terminator after the stream ends so every client sees it, even
     // when the upstream closed without one (EOF without `[DONE]`).
-    Stream.concat(Stream.succeed(encoder.encode(frame(DONE))))
+    Stream.concat(
+      Stream.suspend(() =>
+        terminate() ? Stream.succeed(encoder.encode(frame(DONE))) : Stream.empty
+      )
+    )
   )
 
 /** Header set that keeps intermediaries from buffering an SSE response. */
@@ -121,8 +136,10 @@ export const HEADERS: Readonly<Record<string, string>> = {
 }
 
 /** Wrap a raw chunk payload stream with the framing HTTP needs. */
-export const responseBody = <E>(payloads: Stream.Stream<string, E>): Stream.Stream<Uint8Array, E> =>
-  encode(payloads)
+export const responseBody = <E>(
+  payloads: Stream.Stream<string, E>,
+  terminate: () => boolean = () => true
+): Stream.Stream<Uint8Array, E> => encode(payloads, terminate)
 
 /** A stream that emits an SSE error frame and then terminates. */
 export const errorFrame = (message: string, code: string): Stream.Stream<string> =>

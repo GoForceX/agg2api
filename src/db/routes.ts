@@ -19,6 +19,7 @@ interface RouteRow {
   readonly strategy: string | null
   readonly enabled: number
   readonly display_name: string | null
+  readonly auto: number
   readonly created_at: number
   readonly updated_at: number
 }
@@ -47,9 +48,9 @@ const loadRoutes = (
   Effect.gen(function* () {
     const rows =
       publicModel === null
-        ? yield* sql<RouteRow>`SELECT public_model, strategy, enabled, display_name, created_at, updated_at
+        ? yield* sql<RouteRow>`SELECT public_model, strategy, enabled, display_name, auto, created_at, updated_at
             FROM routes ORDER BY public_model`
-        : yield* sql<RouteRow>`SELECT public_model, strategy, enabled, display_name, created_at, updated_at
+        : yield* sql<RouteRow>`SELECT public_model, strategy, enabled, display_name, auto, created_at, updated_at
             FROM routes WHERE public_model = ${publicModel}`
 
     const out: Route[] = []
@@ -62,6 +63,7 @@ const loadRoutes = (
         strategy: isStrategy(row.strategy) ? row.strategy : null,
         enabled: asBool(row.enabled),
         display_name: row.display_name,
+        auto: asBool(row.auto),
         targets: targets.map(
           (target): RouteTarget => ({
             provider_id: target.provider_id,
@@ -133,13 +135,14 @@ export const createRoute = (
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`
-          INSERT INTO routes (public_model, strategy, enabled, display_name, created_at, updated_at)
+          INSERT INTO routes (public_model, strategy, enabled, display_name, auto, created_at, updated_at)
           VALUES (${input.public_model}, ${input.strategy ?? null}, ${bool(input.enabled ?? true)},
-                  ${input.display_name ?? null}, ${ts}, ${ts})
+                  ${input.display_name ?? null}, ${bool(input.auto ?? false)}, ${ts}, ${ts})
           ON CONFLICT (public_model) DO UPDATE SET
             strategy = excluded.strategy,
             enabled = excluded.enabled,
             display_name = excluded.display_name,
+            auto = excluded.auto,
             updated_at = excluded.updated_at
         `
         yield* replaceTargets(sql, input.public_model, input.targets)

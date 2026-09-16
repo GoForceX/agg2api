@@ -387,7 +387,11 @@ export const settle = (
         status: 502,
         error_kind: failed.kind,
         error_message: failed.message,
-        attempts: committed.attempts
+        attempts: committed.attempts,
+        // A stream that delivered tokens and a usage frame before breaking consumed real
+        // work; recording zeros billed it as free and made failing traffic look cheap.
+        usage: accumulator.usage(),
+        provider: committed.target.provider
       }),
       sql
     )
@@ -441,13 +445,33 @@ const chatCompletions = (holder: EpisodeHolder) => Effect.gen(function* () {
             () => failed
           )
         )
-      )
+      ),
+      // No `[DONE]` after an error frame: the terminator means "the response is
+      // complete", and emitting it for a truncated stream is the bug this prevents.
+      () => failed === null
     )
 
     return HttpServerResponse.stream(body, { status: 200, headers: sse.HEADERS })
   }
 
-  const result = yield* execute(routing, request)
+  // A client that disconnects mid-generation interrupts this fiber, which surfaces as
+  // interruption rather than a typed error — so `guard`'s catchAll never runs and, unlike
+  // the streaming paths, nothing else finalises the episode. The request would vanish from
+  // the dashboard while still having spent an upstream generation.
+  const result = yield* execute(routing, request).pipe(
+    Effect.onInterrupt(() =>
+      effectProvideService(
+        recordFailure(context.episode, {
+          status: 499,
+          error_kind: "aborted",
+          error_message: "client disconnected before the provider answered",
+          // Nothing was produced, so there is no provider to attribute and no usage.
+          attempts: []
+        }),
+        sql
+      )
+    )
+  )
   yield* recordSuccess(
     context.episode,
     result.committed,
@@ -513,7 +537,9 @@ const responses = (holder: EpisodeHolder) => Effect.gen(function* () {
             () => failed
           )
         )
-      )
+      ),
+      // No `[DONE]` after a failure frame — see `encode`.
+      () => failed === null
     )
     return HttpServerResponse.stream(body, { status: 200, headers: sse.HEADERS })
   }

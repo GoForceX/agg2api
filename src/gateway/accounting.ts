@@ -9,7 +9,7 @@
 import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as Chat from "../canonical.ts"
-import type { Endpoint, ProviderKind, UsageEntry } from "../domain.ts"
+import type { Endpoint, Provider, ProviderKind, UsageEntry } from "../domain.ts"
 import { insertUsage } from "../db/usage.ts"
 import type { Attempt, Committed } from "../gateway/executor.ts"
 
@@ -114,6 +114,16 @@ export interface FailureDetails {
   /** Attempts made before giving up; empty when routing failed outright. */
   readonly attempts: ReadonlyArray<Attempt>
   readonly attribution?: FailureAttribution | null
+  /**
+   * Tokens the provider reported before the request failed.
+   *
+   * A stream that delivered content and a usage frame and *then* broke consumed real
+   * tokens and was billed for none of them, so a workload that fails often looked
+   * cheaper than one that succeeds. Zero when nothing was reported.
+   */
+  readonly usage?: Chat.Usage | null
+  /** The provider that served the partial response, for pricing it. */
+  readonly provider?: Provider | null
 }
 
 /**
@@ -131,6 +141,7 @@ export const recordFailure = (
     const sql = yield* SqlClient.SqlClient
     const last = failure.attempts[failure.attempts.length - 1]
     const attribution = failure.attribution ?? null
+    const usage = failure.usage ?? null
 
     const entry: UsageEntry = {
       request_id: episode.request_id,
@@ -144,12 +155,17 @@ export const recordFailure = (
       provider_name: last?.provider_name ?? attribution?.provider_name ?? null,
       provider_kind: last?.provider_kind ?? attribution?.provider_kind ?? null,
       upstream_model: last?.upstream_model ?? attribution?.upstream_model ?? null,
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      cached_tokens: 0,
-      reasoning_tokens: 0,
-      cost: 0,
-      currency: "USD",
+      prompt_tokens: usage?.prompt_tokens ?? 0,
+      completion_tokens: usage?.completion_tokens ?? 0,
+      cached_tokens: usage?.cached_tokens ?? 0,
+      reasoning_tokens: usage?.reasoning_tokens ?? 0,
+      // Priced with the provider that served the partial response: an unknown one yields 0
+      // rather than a guess, matching `computeCost`'s contract.
+      cost:
+        usage === undefined || usage === null
+          ? 0
+          : computeCost(usage, failure.provider?.input_price ?? null, failure.provider?.output_price ?? null),
+      currency: failure.provider?.currency ?? "USD",
       attempts: Math.max(1, failure.attempts.length),
       status: failure.status,
       error_kind: failure.error_kind,

@@ -116,6 +116,104 @@ describe("openaiChatAdapter.complete", () => {
 })
 
 describe("openaiChatAdapter.stream", () => {
+  test("surfaces a failure the provider reports inside the stream", async () => {
+    // A provider cannot report a mid-generation failure by status — the 200 went out with
+    // the first chunk — so the ones that do not drop the connection send an error frame
+    // instead. It carries no choices, so without explicit detection the chunk converter
+    // discards it and the client is left with partial text plus a clean terminator,
+    // reading as a complete response.
+    const encoder = new TextEncoder()
+    const mock = serve(() =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  id: "c1",
+                  object: "chat.completion.chunk",
+                  created: 1,
+                  model: "upstream-model",
+                  choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }]
+                })}\n\n`
+              )
+            )
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ error: { message: "content filter tripped", code: "content_filter" } })}\n\n`
+              )
+            )
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+            controller.close()
+          }
+        }),
+        { headers: { "content-type": "text/event-stream" } }
+      )
+    )
+    try {
+      const upstream = await run(
+        openaiChatAdapter.stream(target(mock.port), request({ stream: true }))
+      )
+      const outcome = await run(Effect.either(Stream.runCollect(upstream.sse)))
+      expect(outcome._tag).toBe("Left")
+      if (outcome._tag === "Left") {
+        // The upstream's own message survives; a generic label would hide the cause.
+        expect(outcome.left.kind).toBe("upstream")
+        expect(outcome.left.message).toContain("content filter tripped")
+      }
+    } finally {
+      await mock.stop()
+    }
+  })
+
+  test("still yields the chunks that arrived before the failure", async () => {
+    // Failover has already been decided by the time this fires, so the partial content
+    // must not be swallowed along with the error.
+    const encoder = new TextEncoder()
+    const mock = serve(() =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  id: "c1",
+                  object: "chat.completion.chunk",
+                  created: 1,
+                  model: "upstream-model",
+                  choices: [{ index: 0, delta: { content: "kept" }, finish_reason: null }]
+                })}\n\n`
+              )
+            )
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: "boom" } })}\n\n`))
+            controller.close()
+          }
+        }),
+        { headers: { "content-type": "text/event-stream" } }
+      )
+    )
+    try {
+      const upstream = await run(openaiChatAdapter.stream(target(mock.port), request({ stream: true })))
+      const seen: string[] = []
+      const outcome = await run(
+        Effect.either(
+          upstream.sse.pipe(
+            Stream.tap((chunk) =>
+              Effect.sync(() => {
+                for (const choice of chunk.choices) seen.push(choice.delta.content ?? "")
+              })
+            ),
+            Stream.runDrain
+          )
+        )
+      )
+      expect(seen.join("")).toBe("kept")
+      expect(outcome._tag).toBe("Left")
+    } finally {
+      await mock.stop()
+    }
+  })
+
   test("reassembles content split across two writes and keeps the usage-only chunk", async () => {
     const first = { index: 0, delta: { content: "Hel" }, finish_reason: null }
     const second = { index: 0, delta: { content: "lo" }, finish_reason: "stop" }

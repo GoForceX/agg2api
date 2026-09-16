@@ -457,6 +457,28 @@ describe("admin API over HTTP", () => {
   })
 })
 
+describe("input bounds and in-band failures", () => {
+  test("rejects an out-of-range max_retries instead of looping forever", async () => {
+    // `max_retries` bounds a loop that only ends when the provider stops failing, and a
+    // 503 without `Retry-After` retries with no delay — so an unbounded value turns one
+    // client request into thousands of upstream calls.
+    for (const bad of [11, -1, 1_000_000, 2.5]) {
+      const response = await admin("/admin/api/providers", {
+        method: "POST",
+        body: JSON.stringify({ name: `bad-${bad}`, kind: "openai-chat", base_url: upstream.base, max_retries: bad })
+      })
+      expect(response.status).toBe(400)
+    }
+    for (const good of [0, 3, 10]) {
+      const response = await admin("/admin/api/providers", {
+        method: "POST",
+        body: JSON.stringify({ name: `ok-${good}`, kind: "openai-chat", base_url: upstream.base, max_retries: good })
+      })
+      expect(response.status).toBe(200)
+    }
+  })
+})
+
 describe("model metadata resolution", () => {
   test("reads metadata through the route's targets, not by matching the public id", async () => {
     // A route's `public_model` and a provider's `public_id` are different namespaces. A
