@@ -86,7 +86,17 @@ export function DashboardView() {
               />
               <Stat label={COPY.metric.promptTokens} value={formatCompact(summary.prompt_tokens)} />
               <Stat label={COPY.metric.completionTokens} value={formatCompact(summary.completion_tokens)} />
-              <Stat label={COPY.metric.cost} value={formatCost(summary.cost)} hint={COPY.dashboard.costHint} />
+              <Stat
+                label={COPY.metric.cost}
+                value={formatCost(summary.cost)}
+                // A total summed across currencies is not a single amount; say so rather
+                // than showing one bare number the operator would read as comparable.
+                hint={
+                  summary.currencies.length > 1
+                    ? COPY.dashboard.costMixedCurrency(summary.currencies.join(" / "))
+                    : COPY.dashboard.costHint
+                }
+              />
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} hint={COPY.dashboard.ttftHint} />
             </div>

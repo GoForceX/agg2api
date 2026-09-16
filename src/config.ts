@@ -179,6 +179,20 @@ export const resolve = (
       web_root: decoded.web_root !== null && decoded.web_root.trim() !== "" ? decoded.web_root : null
     }
 
+    // A blank `db_path` is worse than a blank web root: Bun opens `""` as a private
+    // in-memory database, so the gateway starts looking healthy and discards every
+    // provider, route, key and usage row on exit. Refused rather than defaulted, because
+    // silently choosing a path the operator did not name is how data ends up in a
+    // directory nobody backs up.
+    if (settings.db_path.trim() === "") {
+      return yield* Effect.fail(
+        new ConfigError({
+          source: "db_path",
+          message: "db_path must not be empty; Bun would open it as an in-memory database and discard all data on exit"
+        })
+      )
+    }
+
     // An unauthenticated admin surface on a public interface is a misconfiguration
     // worth refusing outright: it exposes provider keys and lets anyone repoint traffic.
     if (settings.admin_token === "" && !isLoopback(settings.host)) {

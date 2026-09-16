@@ -89,9 +89,26 @@ export const getRoute = (
 ): Effect.Effect<Option.Option<Route>, SqlError> =>
   Effect.map(loadRoutes(sql, publicModel), (routes) => Option.fromNullable(routes[0]))
 
-export const countRoutes = (sql: SqlClient.SqlClient): Effect.Effect<number, SqlError> =>
+/**
+ * Routes that can actually serve a request.
+ *
+ * Not `COUNT(*) FROM routes`: deleting a provider cascades its `route_targets` away and
+ * leaves the route row behind, enabled and pointing at nothing. Counting route rows made
+ * the health probe report `ok` for an instance where `resolveTargets` finds no candidate,
+ * `/v1/models` is empty and every completion 404s — the exact condition the probe exists to
+ * detect, and one an orchestrator would keep sending traffic to.
+ */
+export const countServableRoutes = (sql: SqlClient.SqlClient): Effect.Effect<number, SqlError> =>
   Effect.map(
-    sql<{ count: number }>`SELECT COUNT(*) AS count FROM routes`,
+    sql<{ count: number }>`
+      SELECT COUNT(*) AS count FROM routes r
+       WHERE r.enabled = 1
+         AND EXISTS (
+           SELECT 1 FROM route_targets t
+             JOIN providers p ON p.id = t.provider_id
+            WHERE t.public_model = r.public_model AND t.enabled = 1 AND p.enabled = 1
+         )
+    `,
     (rows) => rows[0]?.count ?? 0
   )
 

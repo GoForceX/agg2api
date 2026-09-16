@@ -124,16 +124,35 @@ export const summary = (
       FROM usage_log WHERE ts >= ${since}
       GROUP BY public_model ORDER BY requests DESC
     `
+    // Grouped on identity, labelled with the current name. Grouping on the *name* merged
+    // two providers that happen to share one and split a single provider's history in two
+    // when it was renamed — the log stores both the id and the name it had at the time, so
+    // the id is what the breakdown must key on. The joined name is preferred over the
+    // logged snapshot so a rename is reflected rather than showing stale labels, and the
+    // snapshot remains the fallback for a provider that has since been deleted.
     const byProvider = yield* sql<AggregateRow>`
-      SELECT provider_name AS key, ${sql.unsafe(SUMMARY_COLUMNS)}
-      FROM usage_log WHERE ts >= ${since}
-      GROUP BY provider_name ORDER BY requests DESC
+      SELECT COALESCE(p.name, MAX(usage_log.provider_name), 'unknown') AS key,
+             ${sql.unsafe(SUMMARY_COLUMNS)}
+      FROM usage_log LEFT JOIN providers p ON p.id = usage_log.provider_id
+      WHERE ts >= ${since}
+      GROUP BY usage_log.provider_id ORDER BY requests DESC
     `
     const byKey = yield* sql<AggregateRow>`
-      SELECT api_key_name AS key, ${sql.unsafe(SUMMARY_COLUMNS)}
-      FROM usage_log WHERE ts >= ${since}
-      GROUP BY api_key_name ORDER BY requests DESC
+      SELECT COALESCE(k.name, MAX(usage_log.api_key_name), 'unknown') AS key,
+             ${sql.unsafe(SUMMARY_COLUMNS)}
+      FROM usage_log LEFT JOIN api_keys k ON k.id = usage_log.api_key_id
+      WHERE ts >= ${since}
+      GROUP BY usage_log.api_key_id ORDER BY requests DESC
     `
+
+    // Read alongside the totals so the dashboard can say when a sum spans currencies.
+    const currencyRows = yield* sql<{ currency: string | null }>`
+      SELECT DISTINCT currency FROM usage_log WHERE ts >= ${since}
+    `
+    const currencies = currencyRows
+      .map((row) => row.currency)
+      .filter((value): value is string => value !== null && value !== "")
+      .sort()
 
     const promptTokens = overall?.prompt_tokens ?? 0
     const cachedTokens = overall?.cached_tokens ?? 0
@@ -148,6 +167,7 @@ export const summary = (
       cached_tokens: cachedTokens,
       reasoning_tokens: overall?.reasoning_tokens ?? 0,
       cost: overall?.cost ?? 0,
+      currencies,
       // Guard the division: a window with no prompt tokens has no defined cache
       // rate, and reporting 0% would read as "caching is broken" rather than "no
       // traffic".

@@ -14,7 +14,7 @@
 import * as Effect from "effect/Effect"
 import * as SqlClient from "@effect/sql/SqlClient"
 import { listProviders } from "../db/providers.ts"
-import { countRoutes } from "../db/routes.ts"
+import { countServableRoutes } from "../db/routes.ts"
 import type { HealthReport } from "./api.ts"
 
 export const health =
@@ -26,7 +26,7 @@ export const health =
       const state = yield* Effect.orElseSucceed(
         Effect.gen(function* () {
           const providers = yield* listProviders(sql)
-          const routes = yield* countRoutes(sql)
+          const routes = yield* countServableRoutes(sql)
           return {
             providers_total: providers.length,
             providers_enabled: providers.filter((provider) => provider.enabled).length,
@@ -47,7 +47,7 @@ export const health =
         return {
           status: "degraded" as const,
           ...state,
-          detail: "no routes: run discovery and sync, or every model will be unknown"
+          detail: "no servable routes: every route is disabled, or its targets point at disabled or deleted providers"
         }
       }
       return { status: "ok" as const, ...state }

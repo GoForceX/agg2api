@@ -355,6 +355,40 @@ describe("usage", () => {
     )
   })
 
+  test("breaks usage down by provider identity, not by its display name", async () => {
+    await runScoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // Two distinct providers that happen to share a name — an ordinary state, and one
+        // the shipped database already contains. Keying the breakdown on the name merged
+        // them into a single row that described neither.
+        yield* insertUsage(sql, usage({ provider_id: 7, provider_name: "openai", api_key_id: 1, api_key_name: "app", prompt_tokens: 100, cost: 1 }))
+        yield* insertUsage(sql, usage({ provider_id: 8, provider_name: "openai", api_key_id: 1, api_key_name: "app", prompt_tokens: 200, cost: 2 }))
+
+        const split = yield* summary(sql, 60_000)
+        expect(split.by_provider).toHaveLength(2)
+        // The currency is reported rather than converted: summing USD and CNY produces a
+        // number with no unit, so the dashboard has to be able to say so.
+        expect(split.currencies).toEqual(["USD"])
+        expect(split.by_provider.map((row) => row.requests)).toEqual([1, 1])
+        // Same-name keys must not merge either.
+        expect(split.by_key).toHaveLength(1)
+
+        // A rename must not split one provider's history in two: the id is stable, the
+        // name is not.
+        yield* insertUsage(sql, usage({ provider_id: 7, provider_name: "openai-renamed", api_key_id: 1, api_key_name: "app", prompt_tokens: 300, cost: 3 }))
+        const afterRename = yield* summary(sql, 60_000)
+        const rows = [...afterRename.by_provider].sort((x, y) => y.requests - x.requests)
+        expect(rows).toHaveLength(2)
+        expect(rows[0]?.requests).toBe(2)
+
+        // Added last so it does not change the provider grouping asserted above.
+        yield* insertUsage(sql, usage({ provider_id: 9, provider_name: "cny", currency: "CNY", cost: 1 }))
+        expect((yield* summary(sql, 60_000)).currencies).toEqual(["CNY", "USD"])
+      })
+    )
+  })
+
   test("summary computes cache rate and buckets by model, provider and key", async () => {
     await runScoped(
       Effect.gen(function* () {
@@ -364,7 +398,9 @@ describe("usage", () => {
           sql,
           usage({
             public_model: "a",
+            provider_id: 1,
             provider_name: "p1",
+            api_key_id: 1,
             api_key_name: "k1",
             prompt_tokens: 1000,
             completion_tokens: 100,
@@ -378,7 +414,9 @@ describe("usage", () => {
           sql,
           usage({
             public_model: "a",
+            provider_id: 1,
             provider_name: "p1",
+            api_key_id: 2,
             api_key_name: "k2",
             prompt_tokens: 1000,
             completion_tokens: 200,

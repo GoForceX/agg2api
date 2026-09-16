@@ -103,6 +103,59 @@ const optionalNumber = (raw: string | undefined): number | null => {
 const maskApiKey = (apiKey: string): string =>
   apiKey === "" ? "" : apiKey.length <= 8 ? "…" : `${apiKey.slice(0, 4)}…`
 
+/**
+ * Header names that carry a credential, matched case-insensitively.
+ *
+ * The same set the adapters treat as authentication (`hasHeader(headers, "authorization")`
+ * in `upstream/http.ts`): a provider can be authenticated entirely through a header
+ * instead of `api_key`, and masking only `api_key` left those credentials in the response
+ * body of every config load, provider create and provider update.
+ */
+const CREDENTIAL_HEADER = /^(authorization|proxy-authorization|x-api-key|api-key|x-goog-api-key)$/i
+
+/**
+ * Mask provider headers for a response.
+ *
+ * Non-credential headers are returned untouched — they are ordinary configuration the
+ * operator needs to see and edit (`anthropic-beta`, trace headers, routing hints).
+ */
+const maskHeaders = (headers: Record<string, string>): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = CREDENTIAL_HEADER.test(name) ? maskApiKey(value) : value
+  }
+  return out
+}
+
+/**
+ * Restore masked credentials the caller did not actually change.
+ *
+ * A masked value is indistinguishable from a real one by shape, so the comparison is
+ * against the *stored* provider's mask: only a value that round-tripped unchanged is
+ * restored. Anything else — a new secret, or a deliberately cleared one — is left alone.
+ */
+const unmaskUnchangedHeaders = (
+  incoming: Record<string, string>,
+  stored: Record<string, string>
+): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(incoming)) {
+    const current = Object.entries(stored).find(([key]) => key.toLowerCase() === name.toLowerCase())
+    out[name] =
+      current !== undefined && CREDENTIAL_HEADER.test(name) && value === maskApiKey(current[1])
+        ? current[1]
+        : value
+  }
+  return out
+}
+
+/** A provider row as the admin API returns it: credentials never leave in the clear. */
+const toMaskedProvider = (provider: Provider): Provider => ({
+  ...provider,
+  api_key: maskApiKey(provider.api_key),
+  headers: maskHeaders(provider.headers)
+})
+
 const toMaskedKey = (key: ApiKey): ApiKeyMasked => ({
   id: key.id,
   name: key.name,
@@ -142,18 +195,31 @@ const requireProvider = (
  * Only fields actually present are checked, because an update is a patch: an absent
  * `base_url` means "keep the stored one", not "must be set".
  */
-const assertProviderInput = (input: Partial<ProviderInput>): Effect.Effect<void, AdminFailure> => {
-  if (input.kind !== undefined && !Schema.is(ProviderKind)(input.kind)) {
-    return Effect.fail(badRequest(`kind "${input.kind}" is not a known provider kind`))
+/**
+ * Validate a provider's `base_url` and return the value that should be stored.
+ *
+ * It returns the value rather than only checking it, so what is stored is exactly what was
+ * validated. Previously the field was trimmed for the check and stored untrimmed, so
+ * `" https://api.openai.com "` was accepted, reported as healthy, and then failed every
+ * request with `InvalidUrl` — an outage caused by a value this API had already passed.
+ * `startsWith("http")` also accepted a bare `"http"`, which builds the unusable
+ * `http/v1/chat/completions`.
+ */
+const normaliseBaseUrl = (raw: string): Effect.Effect<string, AdminFailure> => {
+  const baseUrl = raw.trim().replace(/\/+$/, "")
+  if (!/^https?:\/\/[^\s/]+/.test(baseUrl)) {
+    return Effect.fail(
+      badRequest('base_url must be an absolute http(s) URL with a host, e.g. "https://api.openai.com"')
+    )
   }
-  if (input.base_url !== undefined) {
-    const baseUrl = input.base_url.trim()
-    if (baseUrl === "" || !baseUrl.startsWith("http")) {
-      return Effect.fail(badRequest('base_url must be a non-empty URL starting with "http"'))
-    }
-  }
-  return Effect.void
+  return Effect.succeed(baseUrl)
 }
+
+/** Validate the provider kind, which is a closed set. */
+const assertProviderKind = (input: Partial<ProviderInput>): Effect.Effect<void, AdminFailure> =>
+  input.kind === undefined || Schema.is(ProviderKind)(input.kind)
+    ? Effect.void
+    : Effect.fail(badRequest(`kind "${input.kind}" is not a known provider kind`))
 
 /**
  * Check that every target names a provider that exists.
@@ -275,7 +341,7 @@ export const admin = {
         details.push({
           // The secret is replaced rather than removed: the edit form round-trips
           // `api_key` and renders this value as a "leave untouched to keep" hint.
-          provider: { ...provider, api_key: maskApiKey(provider.api_key) },
+          provider: toMaskedProvider(provider),
           models,
           credits: Option.getOrNull(credits),
           status,
@@ -335,7 +401,13 @@ export const admin = {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const limit = Math.min(MAX_LOG_LIMIT, Math.max(1, integerParam(req.urlParams.limit, DEFAULT_LOG_LIMIT)))
-      const offset = Math.max(0, integerParam(req.urlParams.offset, 0))
+      // Clamped at both ends: SQLite's integer range is the limit, and a value past it
+      // reached `OFFSET` and failed the driver with "datatype mismatch" — a 500 for what is
+      // a nonsense query parameter. `limit` next to it was already clamped this way.
+      const offset = Math.min(
+        Number.MAX_SAFE_INTEGER,
+        Math.max(0, integerParam(req.urlParams.offset, 0))
+      )
       const errorsOnly = req.urlParams.errors_only === "true" || req.urlParams.errors_only === "1"
 
       return yield* fromStorage("reading the usage log", logPage(sql, {
@@ -352,12 +424,16 @@ export const admin = {
   }): Effect.Effect<Provider, AdminFailure, SqlClient.SqlClient> =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* assertProviderInput(req.payload)
-      const created = yield* fromStorage("creating provider", createProvider(sql, req.payload))
+      yield* assertProviderKind(req.payload)
+      const base_url = yield* normaliseBaseUrl(req.payload.base_url)
+      const created = yield* fromStorage(
+        "creating provider",
+        createProvider(sql, { ...req.payload, base_url })
+      )
       // The credential goes in, never back out: a response body ends up in shell
       // history, CI logs and debugging proxies. `/config` already masks it, and the
       // dashboard renders that masked hint rather than this field.
-      return { ...created, api_key: maskApiKey(created.api_key) }
+      return toMaskedProvider(created)
     }),
 
   providerUpdate: (
@@ -366,10 +442,34 @@ export const admin = {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const id = req.path[0]
-      yield* assertProviderInput(req.payload)
-      const updated = yield* fromStorage(`updating provider ${id}`, updateProvider(sql, id, req.payload))
+      yield* assertProviderKind(req.payload)
+      const normalised = {
+        ...req.payload,
+        ...(req.payload.base_url === undefined
+          ? {}
+          : { base_url: yield* normaliseBaseUrl(req.payload.base_url) })
+      }
+
+      // The edit form round-trips every field it was shown, and credentials are shown
+      // masked — so an untouched credential arrives back as its own mask. Writing that
+      // through would replace a working secret with "sk-a…" and silently break the
+      // provider, so a value that is exactly the mask of the stored one means "unchanged".
+      const existing = yield* fromStorage(`loading provider ${id}`, getProvider(sql, id))
+      const payload =
+        Option.isNone(existing) || normalised.headers === undefined
+          ? normalised
+          : {
+              ...normalised,
+              headers: unmaskUnchangedHeaders(normalised.headers, existing.value.headers),
+              // Same rule for the key itself, so a client that does not guard it cannot
+              // overwrite the secret either.
+              ...(normalised.api_key === maskApiKey(existing.value.api_key)
+                ? { api_key: existing.value.api_key }
+                : {})
+            }
+      const updated = yield* fromStorage(`updating provider ${id}`, updateProvider(sql, id, payload))
       if (Option.isNone(updated)) return yield* Effect.fail(notFound(`provider ${id} does not exist`))
-      return { ...updated.value, api_key: maskApiKey(updated.value.api_key) }
+      return toMaskedProvider(updated.value)
     }),
 
   providerDelete: (req: NumberPath): Effect.Effect<void, AdminFailure, SqlClient.SqlClient> =>

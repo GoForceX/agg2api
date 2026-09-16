@@ -14,6 +14,7 @@
  * cut short still appears in the dashboard for what it consumed.
  */
 import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpRouter from "@effect/platform/HttpRouter"
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as Effect from "effect/Effect"
@@ -610,8 +611,12 @@ const models = Effect.gen(function* () {
 
 const modelCard = Effect.gen(function* () {
   yield* openEpisode("chat", { require_model: false })
-  const request = yield* HttpServerRequest.HttpServerRequest
-  const id = decodeURIComponent(new URL(request.url, "http://localhost").pathname.replace(/^\/v1\/models\//, ""))
+  // The router's decoded parameter, not a re-parse of `request.url`. Re-parsing disagreed
+  // with the router in three ways: a `;`-suffixed path (`/v1/models/x;%`) matched the route
+  // but made `decodeURIComponent` throw, turning a bad path into a 500 defect; a trailing
+  // slash and a doubled slash produced ids the router had already normalised away
+  // (`st500/`, `//models//st500`), so an existing model was reported missing.
+  const id = (yield* HttpRouter.params)["0"] ?? ""
 
   const metadata = yield* modelMetadata(id)
   const live = yield* catalogue()

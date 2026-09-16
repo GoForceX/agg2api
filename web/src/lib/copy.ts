@@ -254,6 +254,8 @@ export const COPY = {
     noTraffic: "暂无流量",
     errorRateHint: (rate: string) => `占请求数的 ${rate}`,
     costHint: "由上游上报",
+    /** Shown when providers with different currencies are summed into one figure. */
+    costMixedCurrency: (currencies: string) => `跨币种（${currencies}），该合计无单一单位`,
     ttftHint: "首个 Token 的延迟",
     cacheBarLabel: (rate: string) => `输入缓存命中率 ${rate}`,
     cacheNote: (cached: string, prompt: string) => `${prompt} 个输入 Token 中有 ${cached} 个来自上游缓存。`,

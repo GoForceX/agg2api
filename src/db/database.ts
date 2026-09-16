@@ -64,21 +64,28 @@ const migrate = (filename: string): Effect.Effect<void, never, SqlClient.SqlClie
       )`
     )
 
-    const applied = yield* sql<{ id: number }>`SELECT id FROM agg2api_migrations`
-    const done = new Set(applied.map((row) => row.id))
+    // The ledger is read *inside* the transaction that applies the migrations. Read
+    // outside it (as this did), every process starting in the same window sees the same
+    // pending set and runs the same DDL concurrently: the losers die on "duplicate column
+    // name" / "table already exists", and since a boot failure exits the process, a rolling
+    // restart could crash-loop an instance until a later attempt found the ledger complete.
+    // Taking the write lock first makes a second starter wait and then observe the
+    // recorded version.
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const applied = yield* sql<{ id: number }>`SELECT id FROM agg2api_migrations`
+        const done = new Set(applied.map((row) => row.id))
 
-    for (const migration of migrations) {
-      if (done.has(migration.id)) continue
-      yield* sql.withTransaction(
-        Effect.gen(function* () {
+        for (const migration of migrations) {
+          if (done.has(migration.id)) continue
           for (const statement of migration.statements) {
             yield* sql.unsafe(statement)
           }
           yield* sql`INSERT INTO agg2api_migrations (id, name, applied_at)
             VALUES (${migration.id}, ${migration.name}, ${Date.now()})`
-        })
-      )
-    }
+        }
+      })
+    )
   }).pipe(Effect.orDie)
 
 /** Create the parent directory so a fresh checkout can start without manual setup. */

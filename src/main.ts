@@ -12,6 +12,7 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpRouter from "@effect/platform/HttpRouter"
 import * as HttpServer from "@effect/platform/HttpServer"
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as Effect from "effect/Effect"
@@ -162,7 +163,7 @@ const application = (settings: Settings) => {
   // AppSettings, SqlClient, HttpClient and HttpServer, which plain `provide` would
   // consume and hide.
   return HttpApiBuilder.serve(
-    adminMiddleware({ web_root: webRoot })
+    adminMiddleware({ web_root: webRoot, max_body_bytes: settings.max_body_bytes })
   ).pipe(
     Layer.provide(HttpApiBuilder.api(api)),
     // The admin group's middleware is resolved when its routes are built, so the guard
@@ -174,6 +175,12 @@ const application = (settings: Settings) => {
     ),
     Layer.provideMerge(core),
     Layer.provideMerge(liveLayer(settings.db_path)),
+    // A model id is a path parameter, and upstream catalogues contain ids far longer than
+    // the router's default 100-character cap (a pool's `provider/model:tag` ids routinely
+    // pass it). Past the cap the router matches no route and the platform answers a
+    // bodyless 404 — so a model `/v1/models` advertises is unreachable, and an admin row
+    // with such an id can be created but never edited or deleted.
+    Layer.provide(HttpRouter.setRouterConfig({ maxParamLength: 2048 })),
     Layer.provideMerge(BunHttpServer.layer({ hostname: settings.host, port: settings.port }))
   )
 }

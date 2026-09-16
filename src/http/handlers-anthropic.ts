@@ -14,6 +14,7 @@
  *   protocol does not define, so `namedBody` is used instead.
  */
 import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpRouter from "@effect/platform/HttpRouter"
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as Effect from "effect/Effect"
@@ -237,10 +238,9 @@ const anthropicModels = Effect.gen(function* () {
 
 const anthropicModel = Effect.gen(function* () {
   yield* openEpisode("chat", { require_model: false })
-  const request = yield* HttpServerRequest.HttpServerRequest
-  const id = decodeURIComponent(
-    new URL(request.url, "http://localhost").pathname.replace(/^\/anthropic\/v1\/models\//, "")
-  )
+  // The router's decoded parameter; see `modelCard` for why re-parsing `request.url` was
+  // both a 500 (a malformed escape after a `;`) and a source of phantom 404s.
+  const id = (yield* HttpRouter.params)["0"] ?? ""
 
   const entries = yield* modelCatalogue
   const found = entries.find((entry) => entry.entry.public_model === id)

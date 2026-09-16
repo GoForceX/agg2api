@@ -345,6 +345,15 @@ export const UsageSummary = Schema.Struct({
   cached_tokens: Schema.Number,
   reasoning_tokens: Schema.Number,
   cost: Schema.Number,
+  /**
+   * Currencies the summed `cost` is drawn from.
+   *
+   * A provider's currency is operator-settable, and `cost` was summed across all of them —
+   * so a USD provider and a CNY provider produced one meaningless total. Reported rather
+   * than converted: the gateway has no exchange rates, and inventing one would be worse
+   * than showing the unit. More than one entry means the total is not a single amount.
+   */
+  currencies: Schema.Array(Schema.String),
   cache_rate: Schema.NullOr(Schema.Number),
   avg_latency_ms: Schema.NullOr(Schema.Number),
   avg_ttft_ms: Schema.NullOr(Schema.Number),

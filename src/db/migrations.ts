@@ -182,5 +182,27 @@ export const migrations: ReadonlyArray<Migration> = [
       // is recognised again on the next sync that changes it.
       `ALTER TABLE routes ADD COLUMN auto INTEGER NOT NULL DEFAULT 0`
     ]
+  },
+  {
+    id: 5,
+    name: "adopt_preupgrade_routes",
+    statements: [
+      // Corrects migration 4, whose `DEFAULT 0` marked every pre-existing route as
+      // operator-owned. Nothing could ever clear that: `auto: true` is written only by
+      // `syncRoutes`, and its decisions are gated on `auto` itself — so a route the
+      // previous build's sync had created could never be adopted, updated or removed
+      // again, and a retired model stayed routable forever. That is the very bug the
+      // column was added to fix.
+      //
+      // The pre-migration rule is recoverable exactly: a route was auto-managed precisely
+      // when it had at most one target. Reproducing it here is therefore behaviour-
+      // preserving for every row that already existed, and multi-target routes stay
+      // operator-owned, which is the safe default when ownership is genuinely unknown.
+      // `syncRoutes` additionally adopts a route whose targets exactly match what it
+      // would build, so the multi-target case is reclaimed as discovery confirms it.
+      `UPDATE routes
+          SET auto = 1
+        WHERE (SELECT COUNT(*) FROM route_targets t WHERE t.public_model = routes.public_model) <= 1`
+    ]
   }
 ]

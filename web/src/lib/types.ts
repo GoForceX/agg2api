@@ -210,6 +210,8 @@ export type UsageAggregate = {
 
 export type UsageSummary = {
   window_ms: number
+  /** Currencies the summed `cost` covers; more than one means it is not a single amount. */
+  currencies: string[]
   requests: number
   errors: number
   prompt_tokens: number

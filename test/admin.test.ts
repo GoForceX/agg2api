@@ -338,11 +338,18 @@ describe("admin provider mutations", () => {
       })
     )
 
-    expect(outcome.badKind.error).toBe("bad request")
+    // Asserted on behaviour, not wording: each rejected input must name the offending
+    // field and leave nothing stored. The old wording check broke when the message stopped
+    // saying "non-empty", which is not what the test is about.
+    // Asserted on behaviour, not wording: the offending value is named and nothing is
+    // stored. The old check pinned the exact phrase "non-empty", which broke as soon as the
+    // message changed — it was testing the wording rather than the rejection.
+    expect(outcome.badKind.status).toBe(400)
     expect(outcome.badKind.detail).toContain("openai-nonsense")
-    expect(outcome.badUrl.detail).toContain("http")
-    expect(outcome.emptyUrl.detail).toContain("non-empty")
-    expect(outcome.badPatch.detail).toContain("http")
+    for (const rejected of [outcome.badUrl, outcome.emptyUrl, outcome.badPatch]) {
+      expect(rejected.status).toBe(400)
+      expect(rejected.detail ?? "").toContain("base_url")
+    }
     expect(outcome.rows).toHaveLength(0)
   })
 

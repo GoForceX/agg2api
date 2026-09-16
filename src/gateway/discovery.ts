@@ -224,7 +224,11 @@ export const refreshCredits = (
         total: Option.match(previous, { onNone: () => 0, onSome: (value) => value.total }),
         healthy: Option.match(previous, { onNone: () => 0, onSome: (value) => value.healthy }),
         accounts: Option.match(previous, { onNone: () => [], onSome: (value) => value.accounts }),
-        fetched_at: Date.now(),
+        // The *observation* time, not the attempt time. Stamping `Date.now()` here paired
+        // an old balance with a fresh timestamp, so the dashboard's "fetched at" claimed
+        // the stale figure was just read — the exact staleness this field exists to
+        // expose, and the overstatement grew with the outage.
+        fetched_at: Option.match(previous, { onNone: () => 0, onSome: (value) => value.fetched_at }),
         error: result.message
       }
       yield* saveCredits(sql, provider.id, failed).pipe(Effect.orDie)
@@ -314,18 +318,40 @@ export const syncRoutes = (): Effect.Effect<
         continue
       }
 
-      // A curated multi-target route keeps whatever the operator configured.
-      if (!isAutoManaged) continue
-
       const desired = targets.map((target) => ({
         provider_id: target.provider_id,
         upstream_model: target.upstream_model,
         priority: 100,
         enabled: true
       }))
-      const current = route.targets.map((target) => `${target.provider_id}:${target.upstream_model}`).sort()
-      const next = desired.map((target) => `${target.provider_id}:${target.upstream_model}`).sort()
-      if (current.join("|") === next.join("|")) continue
+      const signature = (entries: ReadonlyArray<{ provider_id: number; upstream_model: string; priority: number; enabled: boolean }>): string =>
+        entries
+          .map((target) => `${target.provider_id}:${target.upstream_model}:${target.priority}:${target.enabled ? 1 : 0}`)
+          .sort()
+          .join("|")
+      const current = signature(route.targets)
+
+      // A route the operator built is left alone — unless it is indistinguishable from what
+      // sync would build, in which case it is adopted. Without this, every route that
+      // predates the `auto` column stays operator-owned forever, because ownership cannot be
+      // reconstructed and nothing else can clear it: a model retired upstream would keep
+      // being advertised and routed. An exact match on providers, upstream ids, priorities
+      // and enabled flags is the strongest available evidence that no curation is present.
+      if (!isAutoManaged) {
+        if (current !== signature(desired)) continue
+        yield* createRoute(sql, {
+          public_model: publicModel,
+          auto: true,
+          strategy: route.strategy,
+          enabled: route.enabled,
+          display_name: route.display_name,
+          targets: desired
+        }).pipe(Effect.orDie)
+        updated.push(publicModel)
+        continue
+      }
+
+      if (current === signature(desired)) continue
 
       yield* createRoute(sql, {
         public_model: publicModel,

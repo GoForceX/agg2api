@@ -111,7 +111,15 @@ export function UsageView() {
               <Stat label={COPY.metric.completionTokens} value={formatCompact(summary.completion_tokens)} />
               <Stat label={COPY.metric.cachedTokens} value={formatCompact(summary.cached_tokens)} />
               <Stat label={COPY.usage.reasoningTokens} value={formatCompact(summary.reasoning_tokens)} />
-              <Stat label={COPY.metric.cost} value={formatCost(summary.cost)} />
+              <Stat
+                label={COPY.metric.cost}
+                value={formatCost(summary.cost)}
+                hint={
+                  summary.currencies.length > 1
+                    ? COPY.dashboard.costMixedCurrency(summary.currencies.join(" / "))
+                    : undefined
+                }
+              />
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} />
             </div>
