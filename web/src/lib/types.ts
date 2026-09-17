@@ -254,6 +254,10 @@ export type UsageOverviewResponse = {
 export type UsageResponse = {
   summary: UsageSummary
   series: UsagePoint[]
+  /** The range and bucket width the payload actually covers, echoed by the server. */
+  from: number
+  to: number
+  bucket_ms: number
 }
 
 export type UsageTotals = {

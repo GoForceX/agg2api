@@ -394,7 +394,13 @@ export const admin = {
       readonly bucket?: string
     }
   }): Effect.Effect<
-    { readonly summary: UsageSummary; readonly series: ReadonlyArray<UsagePoint> },
+    {
+      readonly summary: UsageSummary
+      readonly series: ReadonlyArray<UsagePoint>
+      readonly from: number
+      readonly to: number
+      readonly bucket_ms: number
+    },
     AdminFailure,
     SqlClient.SqlClient
   > =>
@@ -410,7 +416,7 @@ export const admin = {
 
       const rollup = yield* fromStorage("summarising usage", summary(sql, range))
       const buckets = yield* fromStorage("bucketising usage", series(sql, range, bucketMs))
-      return { summary: rollup, series: buckets }
+      return { summary: rollup, series: buckets, from: range.from, to: range.to, bucket_ms: bucketMs }
     }),
 
   usageOverview: (req: {

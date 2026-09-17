@@ -21,6 +21,7 @@ import {
   formatDateTime,
   formatInt,
   formatMs,
+  formatRangeLabel,
   formatTps
 } from "@/lib/format.ts"
 import { parseUsageLog } from "@/lib/log.ts"
@@ -43,6 +44,8 @@ export function UsageView() {
   const usage = useUsage(selected.windowMs, selected.bucketMs, selection ?? undefined)
   const backdrop = useUsageOverview(selected.windowMs, RANGE_POINTS)
   const summary = usage.data?.summary
+  /** What the rendered payload actually covers; falls back to the request while loading. */
+  const shown = usage.data === undefined ? null : { from: usage.data.from, to: usage.data.to, bucket_ms: usage.data.bucket_ms }
 
   const [tab, setTab] = useState<Tab>("model")
   const [model, setModel] = useState("")
@@ -134,8 +137,20 @@ export function UsageView() {
       </div>
 
       <Panel
-        title={COPY.usage.totalsLast(selected.label)}
-        subtitle={COPY.usage.bucketEvery(formatBucket(selected.bucketMs))}
+        // Described from the response, not from the request: the range and the bucket are
+        // derived server-side, and `placeholderData` keeps the previous response on screen
+        // while the next is in flight — so anything read from local state would label the
+        // displayed figures with the *requested* window instead of the one they cover.
+        // With no selection the dropdown already names the window exactly, so the friendly
+        // label is both shorter and unambiguous. A selection is stated as the absolute range
+        // the payload covers, which stays right even while the previous response is on
+        // screen under `placeholderData`.
+        title={
+          selection === null || shown === null
+            ? COPY.usage.totalsLast(selected.label)
+            : COPY.usage.totalsIn(formatRangeLabel(shown.from, shown.to))
+        }
+        subtitle={COPY.usage.bucketEvery(formatBucket(shown?.bucket_ms ?? selected.bucketMs))}
         bodyClassName="p-4"
       >
         {usage.isPending ? (
@@ -182,6 +197,7 @@ export function UsageView() {
                   series={backdrop.data.series}
                   from={backdrop.data.from}
                   to={backdrop.data.to}
+                  longSpan={selected.windowMs >= 86_400_000}
                   selection={selection}
                   onSelect={setSelection}
                   onReset={() => setSelection(null)}

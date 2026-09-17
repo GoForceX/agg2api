@@ -15,6 +15,7 @@ import {
   formatInt,
   formatMs,
   formatPercent,
+  formatRangeLabel,
   formatTps
 } from "@/lib/format.ts"
 import { DEFAULT_WINDOW, RANGE_POINTS, useOverview, useUsage, useUsageOverview } from "@/lib/queries.ts"
@@ -111,7 +112,13 @@ export function DashboardView() {
       </div>
 
       <Panel
-        title={COPY.dashboard.trafficTitle(DEFAULT_WINDOW.label)}
+        // Same rule as the usage view: the dropdown's label while it is the whole window,
+        // and the absolute range the payload covers once a selection narrows it.
+        title={
+          selection === null || usage.data === undefined
+            ? COPY.dashboard.trafficTitle(DEFAULT_WINDOW.label)
+            : COPY.usage.totalsIn(formatRangeLabel(usage.data.from, usage.data.to))
+        }
         subtitle={COPY.dashboard.trafficSubtitle}
         bodyClassName="p-4"
       >
@@ -172,6 +179,7 @@ export function DashboardView() {
                   series={backdrop.data.series}
                   from={backdrop.data.from}
                   to={backdrop.data.to}
+                  longSpan={DEFAULT_WINDOW.windowMs >= 86_400_000}
                   selection={selection}
                   onSelect={setSelection}
                   onReset={() => setSelection(null)}

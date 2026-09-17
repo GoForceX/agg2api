@@ -485,6 +485,7 @@ export const COPY = {
     byKey: "按密钥统计",
     breakdown: "分组统计",
     totalsLast: (window: string) => `最近 ${window}合计`,
+    totalsIn: (range: string) => `${range} 合计`,
     bucketEvery: (bucket: string) => `每 ${bucket}聚合一个数据点`,
     reasoningTokens: "推理 Token",
     requestId: "请求 ID",

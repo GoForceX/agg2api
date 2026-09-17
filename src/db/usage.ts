@@ -130,20 +130,6 @@ const SUMMARY_COLUMNS = `
 const tokensPerSecond = (generationMs: number, tokens: number): number | null =>
   generationMs > 0 && tokens > 0 ? tokens / (generationMs / 1000) : null
 
-const emptyAggregate = (key: string): UsageAggregate => ({
-  key,
-  requests: 0,
-  errors: 0,
-  prompt_tokens: 0,
-  completion_tokens: 0,
-  cached_tokens: 0,
-  reasoning_tokens: 0,
-  cost: 0,
-  avg_latency_ms: 0,
-  avg_ttft_ms: 0,
-  avg_tps: null
-})
-
 const toAggregate = (row: AggregateRow): UsageAggregate => ({
   // Grouping on a nullable column (api_key_name is NULL for keyless access) would
   // otherwise produce a nameless row in the UI table.
@@ -375,14 +361,3 @@ export const purgeOlderThan = (
   cutoffMs: number
 ): Effect.Effect<number, SqlError> =>
   rowCount(sql`DELETE FROM usage_log WHERE ts < ${cutoffMs} RETURNING id`)
-
-/** Distinct public models seen recently, for the log filter dropdown. */
-export const recentModels = (
-  sql: SqlClient.SqlClient
-): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-  Effect.map(
-    sql<{ public_model: string }>`SELECT DISTINCT public_model FROM usage_log ORDER BY public_model`,
-    (rows) => rows.map((row) => row.public_model)
-  )
-
-export { emptyAggregate }

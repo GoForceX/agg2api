@@ -15,11 +15,20 @@ import { RotateCcwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { COPY } from "@/lib/copy.ts"
-import { formatBucket, formatClock, formatInt, formatRangeLabel } from "@/lib/format.ts"
+import { formatClock, formatDateTime, formatInt, formatRangeLabel } from "@/lib/format.ts"
 import { cn } from "cn"
 import type { UsagePoint } from "@/lib/types.ts"
 
 export type RangeSelection = { from: number; to: number }
+
+/** Date and clock; the hour is dropped when it is midnight, which is the common edge. */
+const formatEdge = (ts: number): string => {
+  const at = new Date(ts)
+  if (at.getHours() === 0 && at.getMinutes() === 0) {
+    return at.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+  }
+  return formatDateTime(ts).slice(0, -3)
+}
 
 /** Handles are grabbed within this many pixels of an edge before a new drag starts. */
 const GRAB_PX = 10
@@ -33,6 +42,7 @@ export function RangeSelector({
   from,
   to,
   selection,
+  longSpan,
   onSelect,
   onReset
 }: {
@@ -40,6 +50,8 @@ export function RangeSelector({
   from: number
   to: number
   selection: RangeSelection | null
+  /** A span of a day or more, whose two ends share a clock time and need dates. */
+  longSpan: boolean
   onSelect: (next: RangeSelection) => void
   onReset: () => void
 }) {
@@ -117,8 +129,7 @@ export function RangeSelector({
   }, [drag, timeAt, onSelect, onReset])
 
   const peak = series.reduce((max, point) => Math.max(max, point.requests), 0)
-  const bucketMs = series.length > 1 ? (series[1]?.ts ?? 0) - (series[0]?.ts ?? 0) : 0
-  /** A band per bucket, so the selection snaps to the bars it is choosing between. */
+  /** A band per backdrop bucket, so a sweep is visible before the pointer is released. */
   const bandPct = series.length > 0 ? 100 / series.length : 0
 
   return (
@@ -130,9 +141,6 @@ export function RangeSelector({
         <div className="flex items-center gap-2">
           {selection === null ? null : (
             <>
-              <span className="text-muted-foreground">
-                {COPY.range.bucketSize(formatBucket(bucketMs > 0 ? bucketMs : span / Math.max(1, series.length)))}
-              </span>
               <Button variant="ghost" size="sm" onClick={onReset}>
                 <RotateCcwIcon data-icon="inline-start" />
                 {COPY.range.reset}
@@ -214,10 +222,11 @@ export function RangeSelector({
         ) : null}
       </div>
 
-      <div className="flex justify-between text-xs text-muted-foreground">
-        <span>{formatClock(from)}</span>
+      <div className="flex justify-between gap-2 text-xs text-muted-foreground">
+        {/* `formatClock` would render both ends of a 24h window as the same "15:46". */}
+        <span>{longSpan ? formatEdge(from) : formatClock(from)}</span>
         <span>{COPY.range.dragHint}</span>
-        <span>{formatClock(to)}</span>
+        <span>{longSpan ? formatEdge(to) : formatClock(to)}</span>
       </div>
     </div>
   )

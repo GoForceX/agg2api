@@ -378,8 +378,8 @@ Components are vendored into `web/src/components/ui` rather than installed as a
 dependency, so the theme and every primitive are editable in-tree. Five views:
 
 - **Dashboard** — provider health, model/route/key counts, total credits, and for a
-  chosen window: requests, errors, tokens, **cache rate**, latency, and cost, with a
-  request-volume chart and a per-provider breakdown.
+  chosen window: requests, errors, tokens, **cache rate**, latency, **generation
+  throughput**, and cost, with a request-volume chart and a per-provider breakdown.
 - **Providers** — every provider with kind, priority, enabled state, model count,
   live credits (with a refresh button and per-account detail), breaker state, and
   actions to edit, test, discover, or delete.
@@ -389,6 +389,28 @@ dependency, so the theme and every primitive are editable in-tree. Five views:
   shown once on creation.
 - **Usage** — aggregate tables by model / provider / key and a filterable,
   paginated request log with totals for the filtered set.
+
+Both charts carry a **hover readout** (per-bucket requests, errors, tokens, cache
+rate, throughput, latency, TTFT, cost) and a **draggable range selector** beneath
+them: drag on the backdrop to sweep a range, drag either edge to adjust it. The
+selected range is what the figures above and beside the chart are summarised over,
+so the chart and the tables cannot disagree. A selection is sent to the server as an
+absolute `from`/`to` pair rather than as a narrower window, because a slice of
+history that already happened has two fixed ends.
+
+**Generation throughput** is `completion_tokens / (latency_ms - ttft_ms)`, in
+tokens per second. The subtraction is the point: the window between the first token
+and the last is the only part of a request that scales with generation, so queueing
+and prompt processing are excluded.
+
+That definition depends on what `ttft_ms` measures, which is not what its name
+suggests: it is the time for the upstream to *accept* the request — the
+failover-relevant figure the gateway commits on — and a non-streaming request records
+`0` because it never observes a first byte. Subtracting that zero would count the
+whole request as generation time, so those requests are excluded from the figure
+rather than counted. The same applies to a stream whose only token *was* the first
+token: there is no generation window, so there is no rate. When nothing in a window
+is measurable the figure is reported as `—`, which is not the same claim as `0`.
 
 **Cache rate** is `cached_tokens / prompt_tokens` over the window: the share of
 prompt tokens a provider served from its own prompt cache. Providers that report

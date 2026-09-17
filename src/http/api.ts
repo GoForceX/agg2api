@@ -416,7 +416,20 @@ const admin = HttpApiGroup.make("admin")
       .addSuccess(
         Schema.Struct({
           summary: UsageSummary,
-          series: Schema.Array(UsagePoint)
+          series: Schema.Array(UsagePoint),
+          /**
+           * The range and bucket width the payload actually covers.
+           *
+           * Echoed rather than left for the caller to recompute. Both are derived
+           * server-side — the range from `from`/`to` after validation, the bucket from the
+           * span after clamping to a minute — and a client that recomputed them would
+           * label the chart with figures the data was not aggregated at. It also lets the
+           * view describe what it *is* showing rather than what it asked for, which differ
+           * while a previous response is still on screen.
+           */
+          from: Schema.Number,
+          to: Schema.Number,
+          bucket_ms: Schema.Number
         })
       )
   )
