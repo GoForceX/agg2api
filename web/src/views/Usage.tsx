@@ -3,6 +3,7 @@ import { ActivityIcon, RefreshCwIcon } from "lucide-react"
 
 import { AggregateTable } from "@/components/AggregateTable"
 import { BarChart } from "@/components/BarChart"
+import { RangeSelector, type RangeSelection } from "@/components/RangeSelector"
 import { ErrorPanel, Loading, Panel, PendingButton, Stat, ToneBadge } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -19,10 +20,11 @@ import {
   formatCost,
   formatDateTime,
   formatInt,
-  formatMs
+  formatMs,
+  formatTps
 } from "@/lib/format.ts"
 import { parseUsageLog } from "@/lib/log.ts"
-import { WINDOWS, useAdminConfig, useUsage, useUsageLog } from "@/lib/queries.ts"
+import { RANGE_POINTS, WINDOWS, useAdminConfig, useUsage, useUsageLog, useUsageOverview } from "@/lib/queries.ts"
 import type { UsageLogRow } from "@/lib/types.ts"
 
 const PAGE_SIZE = 50
@@ -35,7 +37,11 @@ export function UsageView() {
   const [windowId, setWindowId] = useState<string>(WINDOWS[1].id)
   const selected = WINDOWS.find((window) => window.id === windowId) ?? WINDOWS[1]
 
-  const usage = useUsage(selected.windowMs, selected.bucketMs)
+  /** A slice chosen on the chart; cleared whenever the window changes, since the old
+      bounds may not lie inside the new one. */
+  const [selection, setSelection] = useState<RangeSelection | null>(null)
+  const usage = useUsage(selected.windowMs, selected.bucketMs, selection ?? undefined)
+  const backdrop = useUsageOverview(selected.windowMs, RANGE_POINTS)
   const summary = usage.data?.summary
 
   const [tab, setTab] = useState<Tab>("model")
@@ -98,6 +104,7 @@ export function UsageView() {
             value={windowId}
             onValueChange={(value) => {
               setWindowId(value ?? WINDOWS[1].id)
+              setSelection(null)
               setPage(0)
             }}
           >
@@ -161,10 +168,25 @@ export function UsageView() {
               />
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} />
+              <Stat
+                label={COPY.metric.tps}
+                value={formatTps(summary.avg_tps)}
+                hint={COPY.metric.tpsHint}
+              />
             </div>
             <div className="flex flex-col gap-2">
               <h3 className="text-sm font-medium">{COPY.chart.requestsOverTime}</h3>
               <BarChart points={usage.data?.series ?? []} label={COPY.chart.label(selected.label)} />
+              {backdrop.data === undefined ? null : (
+                <RangeSelector
+                  series={backdrop.data.series}
+                  from={backdrop.data.from}
+                  to={backdrop.data.to}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onReset={() => setSelection(null)}
+                />
+              )}
             </div>
           </div>
         )}
@@ -294,6 +316,7 @@ export function UsageView() {
                   <TableHead>{COPY.column.status}</TableHead>
                   <TableHead className="text-right">{COPY.column.latency}</TableHead>
                   <TableHead className="text-right">{COPY.usage.ttft}</TableHead>
+                  <TableHead className="text-right">{COPY.column.tps}</TableHead>
                   <TableHead>{COPY.column.clientKey}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -316,7 +339,7 @@ export function UsageView() {
                       {formatCompact(log.data.totals.cached_tokens)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCost(log.data.totals.cost)}</TableCell>
-                    <TableCell colSpan={5} />
+                    <TableCell colSpan={6} />
                   </TableRow>
                 </TableFooter>
               ) : null}
@@ -392,6 +415,7 @@ function LogRowView({ row }: { row: UsageLogRow }) {
       </TableCell>
       <TableCell className="text-right tabular-nums">{formatMs(row.latency_ms)}</TableCell>
       <TableCell className="text-right tabular-nums">{formatMs(row.ttft_ms)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatTps(row.tps)}</TableCell>
       <TableCell className="text-xs">{row.api_key_name ?? "—"}</TableCell>
     </TableRow>
   )

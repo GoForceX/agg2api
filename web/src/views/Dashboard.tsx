@@ -1,7 +1,9 @@
+import { useState } from "react"
 import { AlertTriangleIcon, RefreshCwIcon } from "lucide-react"
 
 import { AggregateTable } from "@/components/AggregateTable"
 import { BarChart } from "@/components/BarChart"
+import { RangeSelector, type RangeSelection } from "@/components/RangeSelector"
 import { CacheMeter, ErrorPanel, Loading, Panel, PendingButton, Stat, ToneBadge } from "@/components/common"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { COPY } from "@/lib/copy.ts"
@@ -12,13 +14,19 @@ import {
   formatDuration,
   formatInt,
   formatMs,
-  formatPercent
+  formatPercent,
+  formatTps
 } from "@/lib/format.ts"
-import { DEFAULT_WINDOW, useOverview, useUsage } from "@/lib/queries.ts"
+import { DEFAULT_WINDOW, RANGE_POINTS, useOverview, useUsage, useUsageOverview } from "@/lib/queries.ts"
 
 export function DashboardView() {
   const overview = useOverview()
-  const usage = useUsage(DEFAULT_WINDOW.windowMs, DEFAULT_WINDOW.bucketMs)
+  /** A slice the operator chose on the chart; `null` means the whole window. */
+  const [selection, setSelection] = useState<RangeSelection | null>(null)
+  const usage = useUsage(DEFAULT_WINDOW.windowMs, DEFAULT_WINDOW.bucketMs, selection ?? undefined)
+  // Loaded once for the selector's backdrop, which must keep showing the whole window
+  // even while a narrower range is being summarised above it.
+  const backdrop = useUsageOverview(DEFAULT_WINDOW.windowMs, RANGE_POINTS)
 
   if (overview.isPending) return <Loading label={COPY.state.loadingOverview} />
   if (overview.isError) return <ErrorPanel error={overview.error} onRetry={() => void overview.refetch()} />
@@ -140,6 +148,11 @@ export function DashboardView() {
               />
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} hint={COPY.dashboard.ttftHint} />
+              <Stat
+                label={COPY.metric.tps}
+                value={formatTps(summary.avg_tps)}
+                hint={COPY.metric.tpsHint}
+              />
             </div>
 
             <CacheMeter
@@ -154,6 +167,16 @@ export function DashboardView() {
             <div className="flex flex-col gap-2">
               <h3 className="text-sm font-medium">{COPY.chart.requestsOverTime}</h3>
               <BarChart points={series} label={COPY.chart.label(DEFAULT_WINDOW.label)} />
+              {backdrop.data === undefined ? null : (
+                <RangeSelector
+                  series={backdrop.data.series}
+                  from={backdrop.data.from}
+                  to={backdrop.data.to}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onReset={() => setSelection(null)}
+                />
+              )}
             </div>
           </div>
         )}

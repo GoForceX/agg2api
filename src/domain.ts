@@ -324,7 +324,9 @@ export const UsageAggregate = Schema.Struct({
   reasoning_tokens: Schema.Number,
   cost: Schema.Number,
   avg_latency_ms: Schema.Number,
-  avg_ttft_ms: Schema.Number
+  avg_ttft_ms: Schema.Number,
+  /** Output tokens per second per request; `null` when nothing was long enough to measure. */
+  avg_tps: Schema.NullOr(Schema.Number)
 })
 export type UsageAggregate = typeof UsageAggregate.Type
 
@@ -357,6 +359,19 @@ export const UsageSummary = Schema.Struct({
   cache_rate: Schema.NullOr(Schema.Number),
   avg_latency_ms: Schema.NullOr(Schema.Number),
   avg_ttft_ms: Schema.NullOr(Schema.Number),
+  /**
+   * Output tokens per second, `completion_tokens / (latency_ms - ttft_ms)`.
+   *
+   * The window between the first token and the last is the only part of the request
+   * that scales with generation, so queueing and prompt processing are excluded: a
+   * long prompt that was processed slowly does not make the model look slow, and a
+   * cache hit that skipped the prompt phase does not make it look fast.
+   *
+   * `null` when no request in the window produced a positive generation window —
+   * including every non-streaming request, where `ttft_ms` is 0 by construction and
+   * the whole latency would otherwise be counted as generation time.
+   */
+  avg_tps: Schema.NullOr(Schema.Number),
   by_model: Schema.Array(UsageAggregate),
   by_provider: Schema.Array(UsageAggregate),
   by_key: Schema.Array(UsageAggregate)
@@ -371,6 +386,10 @@ export const UsagePoint = Schema.Struct({
   prompt_tokens: Schema.Number,
   completion_tokens: Schema.Number,
   cached_tokens: Schema.Number,
-  cost: Schema.Number
+  cost: Schema.Number,
+  avg_latency_ms: Schema.NullOr(Schema.Number),
+  avg_ttft_ms: Schema.NullOr(Schema.Number),
+  /** Output tokens per second over the bucket; `null` when nothing in it was measurable. */
+  tps: Schema.NullOr(Schema.Number)
 })
 export type UsagePoint = typeof UsagePoint.Type

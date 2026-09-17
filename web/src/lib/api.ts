@@ -17,6 +17,7 @@ import type {
   RouteInput,
   RouteSyncResult,
   UsageLogResponse,
+  UsageOverviewResponse,
   UsageResponse
 } from "./types.ts"
 
@@ -152,6 +153,12 @@ async function request<T>(path: string, spec: RequestSpec = {}): Promise<T> {
 
 const pathSegment = (value: string): string => encodeURIComponent(value)
 
+/**
+ * A selected time range. Both bounds are epoch milliseconds and inclusive, matching what
+ * the chart's brush hands back; a range that is not supplied falls back to `windowMs`.
+ */
+export type UsageRange = { from: number; to: number }
+
 export type UsageLogParams = {
   limit: number
   offset: number
@@ -163,7 +170,17 @@ export type UsageLogParams = {
 export const api = {
   overview: () => request<Overview>("/overview"),
   config: () => request<AdminConfig>("/config"),
-  usage: (windowMs: number, bucketMs: number) => request<UsageResponse>("/usage", { query: { window: windowMs, bucket: bucketMs } }),
+  usage: (windowMs: number, bucketMs: number, range?: UsageRange) =>
+    request<UsageResponse>("/usage", {
+      query: {
+        window: windowMs,
+        bucket: bucketMs,
+        from: range?.from,
+        to: range?.to
+      }
+    }),
+  usageOverview: (windowMs: number, points: number) =>
+    request<UsageOverviewResponse>("/usage/overview", { query: { window: windowMs, points } }),
   usageLog: (params: UsageLogParams) => request<UsageLogResponse>("/usage/log", { query: { ...params } }),
 
   createProvider: (input: ProviderInput) => request<Provider>("/providers", { method: "POST", body: input }),

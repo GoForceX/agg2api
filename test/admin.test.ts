@@ -571,6 +571,53 @@ describe("admin.usage", () => {
     expect(result.series.length).toBeGreaterThanOrEqual(1)
     for (const point of result.series) expect(point.ts % 60_000).toBe(0)
   })
+
+  test("an explicit range wins over the window, and only applies as a pair", async () => {
+    // Anchored well in the past so "inserted at now" cannot drift into the range.
+    const base = 1_700_000_000_000
+    const result = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (let i = 0; i < 4; i += 1) {
+          yield* insertUsage(sql, usage({ ts: base + i * 60_000, prompt_tokens: 10 }))
+        }
+        yield* insertUsage(sql, usage({ ts: base + 10 * 60_000, prompt_tokens: 999 }))
+        return {
+          ranged: yield* admin.usage({
+            urlParams: { from: String(base), to: String(base + 3 * 60_000) }
+          }),
+          fromOnly: yield* admin.usage({ urlParams: { from: String(base) } }),
+          inverted: yield* admin.usage({ urlParams: { from: String(base + 60_000), to: String(base) } })
+        }
+      })
+    )
+
+    // Four rows inside, and the row ten minutes later excluded.
+    expect(result.ranged.summary.requests).toBe(4)
+    expect(result.ranged.summary.prompt_tokens).toBe(40)
+    expect(result.ranged.summary.window_ms).toBe(3 * 60_000)
+
+    // A lone bound is not half a range: it would mean "everything since 2023" or
+    // "everything until the end of time", and the caller cannot tell which it got.
+    expect(result.fromOnly.summary.window_ms).toBe(24 * 60 * 60 * 1000)
+    expect(result.fromOnly.summary.requests).toBe(0)
+    // An inverted pair is equally unusable, and falls back rather than reporting an
+    // empty chart that looks like "no traffic".
+    expect(result.inverted.summary.window_ms).toBe(24 * 60 * 60 * 1000)
+  })
+
+  test("the overview histogram spans the whole window regardless of any range", async () => {
+    const result = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* insertUsage(sql, usage({ ts: Date.now() - 1_000, prompt_tokens: 1 }))
+        return yield* admin.usageOverview({ urlParams: { window: "3600000", points: "12" } })
+      })
+    )
+    expect(result.to).toBeGreaterThan(result.from)
+    expect(result.to - result.from).toBe(3_600_000)
+    expect(result.series.reduce((sum, point) => sum + point.requests, 0)).toBe(1)
+  })
 })
 
 describe("admin.providerTest", () => {

@@ -206,6 +206,8 @@ export type UsageAggregate = {
   cost: number
   avg_latency_ms: number
   avg_ttft_ms: number
+  /** Output tokens per second over the summed generation windows; null when unmeasured. */
+  avg_tps: number | null
 }
 
 export type UsageSummary = {
@@ -222,6 +224,7 @@ export type UsageSummary = {
   cache_rate: number | null
   avg_latency_ms: number | null
   avg_ttft_ms: number | null
+  avg_tps: number | null
   by_model: UsageAggregate[]
   by_provider: UsageAggregate[]
   by_key: UsageAggregate[]
@@ -235,6 +238,17 @@ export type UsagePoint = {
   completion_tokens: number
   cached_tokens: number
   cost: number
+  avg_latency_ms: number | null
+  avg_ttft_ms: number | null
+  /** Output tokens per second over the bucket; null when nothing in it was measurable. */
+  tps: number | null
+}
+
+/** Coarse histogram of the whole retained history, for the range selector. */
+export type UsageOverviewResponse = {
+  from: number
+  to: number
+  series: UsagePoint[]
 }
 
 export type UsageResponse = {
@@ -275,6 +289,8 @@ export type UsageLogRow = {
   error_message: string | null
   latency_ms: number
   ttft_ms: number
+  /** Output tokens per second for this request; null when it had no generation window. */
+  tps: number | null
   api_key_name: string | null
 }
 

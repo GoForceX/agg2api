@@ -3,12 +3,13 @@ import { COPY } from "./copy.ts"
 import { useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ApiError, api } from "./api.ts"
-import type { UsageLogParams } from "./api.ts"
+import type { UsageLogParams, UsageRange } from "./api.ts"
 
 export const queryKeys = {
   overview: ["overview"] as const,
   config: ["config"] as const,
   usage: ["usage"] as const,
+  usageOverview: ["usageOverview"] as const,
   usageLog: ["usageLog"] as const
 }
 
@@ -21,6 +22,15 @@ export const WINDOWS = [
 ] as const
 
 export const DEFAULT_WINDOW = WINDOWS[1]
+
+/**
+ * Bars in the range selector's backdrop.
+ *
+ * Fixed rather than derived from the window: it is a shape to aim at, and a resolution
+ * that changes with the window would make the same selection mean different things to
+ * the eye at different spans.
+ */
+export const RANGE_POINTS = 120
 
 /** Client errors and 4xx are terminal; 5xx and transport failures are worth one more try. */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
@@ -36,11 +46,29 @@ export function useAdminConfig() {
   return useQuery({ queryKey: queryKeys.config, queryFn: api.config, retry: shouldRetry })
 }
 
-export function useUsage(windowMs: number, bucketMs: number) {
+/**
+ * The summarised window. `range` narrows it to a slice the operator selected on the
+ * chart; the query key includes both bounds so a selection is its own cache entry and
+ * dragging back to a previous range is served instantly.
+ */
+export function useUsage(windowMs: number, bucketMs: number, range?: UsageRange) {
   return useQuery({
-    queryKey: [...queryKeys.usage, windowMs, bucketMs],
-    queryFn: () => api.usage(windowMs, bucketMs),
-    retry: shouldRetry
+    queryKey: [...queryKeys.usage, windowMs, bucketMs, range?.from ?? null, range?.to ?? null],
+    queryFn: () => api.usage(windowMs, bucketMs, range),
+    retry: shouldRetry,
+    placeholderData: (previous) => previous
+  })
+}
+
+/** Coarse histogram of the whole window, so the range selector has something to aim at. */
+export function useUsageOverview(windowMs: number, points: number) {
+  return useQuery({
+    queryKey: [...queryKeys.usageOverview, windowMs, points],
+    queryFn: () => api.usageOverview(windowMs, points),
+    retry: shouldRetry,
+    // The brush's own backdrop: it changes only as history ages, not as the operator
+    // drags, so it must not refetch on every selection.
+    staleTime: 60_000
   })
 }
 

@@ -8,7 +8,7 @@ import { createRoute, deleteRoute, getRoute, listRoutes, resolveTargets, updateR
 import { createKey, deleteKey, getKeyByValue, listKeys, maskKey, touchKey, updateKey } from "../src/db/keys.ts"
 import { getProviderStatus, listProviderStatuses, recordFailure, recordSuccess, resetProviderHealth } from "../src/db/health.ts"
 import { getCredits, listCredits, saveCredits } from "../src/db/credits.ts"
-import { insertUsage, logPage, purgeOlderThan, series, summary } from "../src/db/usage.ts"
+import { insertUsage, logPage, purgeOlderThan, rangeOf, series, summary } from "../src/db/usage.ts"
 import type { DiscoveredModel, UsageEntry } from "../src/domain.ts"
 
 const model = (id: string, publicId = id): DiscoveredModel => ({
@@ -342,7 +342,7 @@ describe("usage", () => {
           yield* insertUsage(sql, usage({ ts: base + offset * 1000, status: 200 }))
         }
 
-        const points = yield* series(sql, 3_600_000, bucket)
+        const points = yield* series(sql, { from: base, to: base + bucket - 1 }, bucket)
         const inBucket = points.filter((point) => point.ts === base)
 
         // `GROUP BY ts` resolves to the input column in SQLite, so the six rows would
@@ -351,6 +351,71 @@ describe("usage", () => {
         expect(inBucket).toHaveLength(1)
         expect(inBucket[0]?.requests).toBe(6)
         expect(points.every((point) => point.ts % bucket === 0)).toBe(true)
+      })
+    )
+  })
+
+  test("a range excludes rows outside it, at both ends", async () => {
+    await runScoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const base = 1_700_000_000_000
+        yield* insertUsage(sql, usage({ ts: base - 1, prompt_tokens: 1 }))
+        yield* insertUsage(sql, usage({ ts: base, prompt_tokens: 2 }))
+        yield* insertUsage(sql, usage({ ts: base + 500, prompt_tokens: 4 }))
+        yield* insertUsage(sql, usage({ ts: base + 1_000, prompt_tokens: 8 }))
+
+        const bounded = yield* summary(sql, { from: base, to: base + 1_000 })
+        // Inclusive at both bounds: a range the operator selected on the chart must
+        // include the bucket under each end of the selection.
+        expect(bounded.requests).toBe(3)
+        expect(bounded.prompt_tokens).toBe(14)
+
+        const narrow = yield* summary(sql, { from: base + 500, to: base + 500 })
+        expect(narrow.requests).toBe(1)
+        expect(narrow.window_ms).toBe(0)
+
+        // An empty range is a legitimate question with the answer "nothing", not an error.
+        const none = yield* summary(sql, { from: base + 2_000, to: base + 3_000 })
+        expect(none.requests).toBe(0)
+        expect(none.cache_rate).toBeNull()
+      })
+    )
+  })
+
+  test("tps uses the generation window, and abstains when there is none", async () => {
+    await runScoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // Two streamed requests: 1s and 3s of generation, 100 and 300 output tokens.
+        // Summed before dividing, so the figure is 400 tokens / 4s = 100 tps. Averaging
+        // the per-request rates happens to agree here, but would not if one request
+        // produced 1 token and the other 1000 — the short one would weigh the same.
+        yield* insertUsage(sql, usage({ completion_tokens: 100, latency_ms: 1_500, ttft_ms: 500 }))
+        yield* insertUsage(sql, usage({ completion_tokens: 300, latency_ms: 5_000, ttft_ms: 2_000 }))
+
+        expect((yield* summary(sql, rangeOf(60_000))).avg_tps).toBeCloseTo(100, 10)
+
+        // A non-streaming request records ttft_ms = 0 because the gateway never observes a
+        // first byte. Counting its whole latency as generation time would report a rate for
+        // something that was never measured — and 100k tokens over 1s would swamp the
+        // figure, which is exactly the wrong answer rather than a merely imprecise one.
+        yield* insertUsage(sql, usage({ completion_tokens: 100_000, latency_ms: 1_000, ttft_ms: 0 }))
+        expect((yield* summary(sql, rangeOf(60_000))).avg_tps).toBeCloseTo(100, 10)
+
+        // A stream whose only token *was* the first token leaves a zero-length generation
+        // window. There is no rate to divide by, so the row contributes to neither side.
+        yield* insertUsage(sql, usage({ completion_tokens: 50, latency_ms: 1_000, ttft_ms: 1_000 }))
+        expect((yield* summary(sql, rangeOf(60_000))).avg_tps).toBeCloseTo(100, 10)
+
+        // "Unmeasured" and "zero tokens per second" are different claims, and only one of
+        // them is a fault — a window holding only unmeasurable requests reports null.
+        const isolated = 1_700_000_000_000
+        yield* insertUsage(sql, usage({ ts: isolated, completion_tokens: 5, latency_ms: 900, ttft_ms: 0 }))
+        const onlyUnmeasured = yield* summary(sql, { from: isolated, to: isolated })
+        expect(onlyUnmeasured.requests).toBe(1)
+        expect(onlyUnmeasured.avg_tps).toBeNull()
+        expect((yield* summary(sql, { from: 1, to: 2 })).avg_tps).toBeNull()
       })
     )
   })
@@ -365,7 +430,7 @@ describe("usage", () => {
         yield* insertUsage(sql, usage({ provider_id: 7, provider_name: "openai", api_key_id: 1, api_key_name: "app", prompt_tokens: 100, cost: 1 }))
         yield* insertUsage(sql, usage({ provider_id: 8, provider_name: "openai", api_key_id: 1, api_key_name: "app", prompt_tokens: 200, cost: 2 }))
 
-        const split = yield* summary(sql, 60_000)
+        const split = yield* summary(sql, rangeOf(60_000))
         expect(split.by_provider).toHaveLength(2)
         // The currency is reported rather than converted: summing USD and CNY produces a
         // number with no unit, so the dashboard has to be able to say so.
@@ -377,14 +442,14 @@ describe("usage", () => {
         // A rename must not split one provider's history in two: the id is stable, the
         // name is not.
         yield* insertUsage(sql, usage({ provider_id: 7, provider_name: "openai-renamed", api_key_id: 1, api_key_name: "app", prompt_tokens: 300, cost: 3 }))
-        const afterRename = yield* summary(sql, 60_000)
+        const afterRename = yield* summary(sql, rangeOf(60_000))
         const rows = [...afterRename.by_provider].sort((x, y) => y.requests - x.requests)
         expect(rows).toHaveLength(2)
         expect(rows[0]?.requests).toBe(2)
 
         // Added last so it does not change the provider grouping asserted above.
         yield* insertUsage(sql, usage({ provider_id: 9, provider_name: "cny", currency: "CNY", cost: 1 }))
-        expect((yield* summary(sql, 60_000)).currencies).toEqual(["CNY", "USD"])
+        expect((yield* summary(sql, rangeOf(60_000))).currencies).toEqual(["CNY", "USD"])
       })
     )
   })
@@ -429,7 +494,7 @@ describe("usage", () => {
           })
         )
 
-        const result = yield* summary(sql, 60_000)
+        const result = yield* summary(sql, rangeOf(60_000))
         expect(result.requests).toBe(2)
         expect(result.errors).toBe(0)
         expect(result.prompt_tokens).toBe(2000)
@@ -446,7 +511,7 @@ describe("usage", () => {
         expect([...result.by_key.map((row) => row.key)].sort()).toEqual(["k1", "k2"])
 
         // An empty window has no defined cache rate — null, not a misleading 0%.
-        const empty = yield* summary(sql, -1)
+        const empty = yield* summary(sql, rangeOf(-1))
         expect(empty.requests).toBe(0)
         expect(empty.cache_rate).toBeNull()
         expect(empty.avg_latency_ms).toBeNull()
@@ -524,7 +589,7 @@ describe("usage", () => {
         expect(byProvider.total).toBe(5)
 
         expect(yield* purgeOlderThan(sql, Date.now() + 1000)).toBe(6)
-        expect((yield* summary(sql, 60_000)).requests).toBe(0)
+        expect((yield* summary(sql, rangeOf(60_000))).requests).toBe(0)
       })
     )
   })

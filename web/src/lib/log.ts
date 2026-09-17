@@ -7,6 +7,9 @@ import type { UsageLogRow, UsageLogResponse } from "./types.ts"
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 const nullableText = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null)
 const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0)
+/** A number that is genuinely absent when the server sends null — "unmeasured", not 0. */
+const optionalCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null
 const flag = (value: unknown): boolean => value === true
 
 export function parseLogRow(row: unknown): UsageLogRow {
@@ -29,6 +32,7 @@ export function parseLogRow(row: unknown): UsageLogRow {
     error_message: nullableText(source.error_message),
     latency_ms: count(source.latency_ms),
     ttft_ms: count(source.ttft_ms),
+    tps: optionalCount(source.tps),
     api_key_name: nullableText(source.api_key_name)
   }
 }

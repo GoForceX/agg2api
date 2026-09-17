@@ -5,7 +5,7 @@ import { TableIcon } from "lucide-react"
 
 import { ToneBadge } from "@/components/common"
 import { COPY } from "@/lib/copy.ts"
-import { formatCompact, formatCost, formatInt, formatMs, formatPercent } from "@/lib/format.ts"
+import { formatCompact, formatCost, formatInt, formatMs, formatPercent, formatTps } from "@/lib/format.ts"
 import type { UsageAggregate } from "@/lib/types.ts"
 
 export function AggregateTable({ rows, empty }: { rows: UsageAggregate[]; empty: string }) {
@@ -35,6 +35,7 @@ export function AggregateTable({ rows, empty }: { rows: UsageAggregate[]; empty:
           <TableHead className="text-right">{COPY.column.cost}</TableHead>
           <TableHead className="text-right">{COPY.column.avgLatency}</TableHead>
           <TableHead className="text-right">{COPY.column.avgTtft}</TableHead>
+          <TableHead className="text-right">{COPY.column.tps}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -53,6 +54,7 @@ export function AggregateTable({ rows, empty }: { rows: UsageAggregate[]; empty:
               <TableCell className="text-right tabular-nums">{formatCost(row.cost)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatMs(row.avg_latency_ms)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatMs(row.avg_ttft_ms)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatTps(row.avg_tps)}</TableCell>
             </TableRow>
           )
         })}

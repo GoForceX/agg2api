@@ -404,8 +404,11 @@ const admin = HttpApiGroup.make("admin")
     HttpApiEndpoint.get("usage")`/admin/api/usage`
       .setUrlParams(
         Schema.Struct({
-          /** Milliseconds of history to summarise. */
+          /** Milliseconds of history to summarise, ending now. */
           window: Schema.optional(Schema.String),
+          /** Inclusive range bounds in epoch ms; both must be present to take effect. */
+          from: Schema.optional(Schema.String),
+          to: Schema.optional(Schema.String),
           /** Bucket width in milliseconds for the time series. */
           bucket: Schema.optional(Schema.String)
         })
@@ -413,6 +416,32 @@ const admin = HttpApiGroup.make("admin")
       .addSuccess(
         Schema.Struct({
           summary: UsageSummary,
+          series: Schema.Array(UsagePoint)
+        })
+      )
+  )
+  .add(
+    /**
+     * A coarse request histogram over the whole retained history.
+     *
+     * The chart's range selector needs to show what there is to select *before* a range
+     * is chosen, so this deliberately ignores any range: it is the overview the brush
+     * slides over. Returned at a fixed resolution rather than the viewer's bucket width,
+     * because it is a shape to aim at, not a chart to read.
+     */
+    HttpApiEndpoint.get("usageOverview")`/admin/api/usage/overview`
+      .setUrlParams(
+        Schema.Struct({
+          /** History to cover in milliseconds. */
+          window: Schema.optional(Schema.String),
+          /** Number of points to reduce it to. */
+          points: Schema.optional(Schema.String)
+        })
+      )
+      .addSuccess(
+        Schema.Struct({
+          from: Schema.Number,
+          to: Schema.Number,
           series: Schema.Array(UsagePoint)
         })
       )

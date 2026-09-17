@@ -31,7 +31,7 @@ import { getProviderStatus, listProviderStatuses } from "../../db/health.ts"
 import { countKeys, createKey, deleteKey, listKeys, maskKey, updateKey } from "../../db/keys.ts"
 import { createProvider, deleteProvider, getProvider, listModels, listModelsForProvider, listProviders, updateProvider } from "../../db/providers.ts"
 import { createRoute, deleteRoute, listRoutes, updateRoute } from "../../db/routes.ts"
-import { logPage, series, summary } from "../../db/usage.ts"
+import { logPage, rangeOf, series, summary, type UsageRange } from "../../db/usage.ts"
 import { discoverAll as discoverEveryProvider, discoverProvider, refreshCredits, syncRoutes } from "../../gateway/discovery.ts"
 import { indexStatus } from "../../models/capabilities.ts"
 import { probeProvider } from "../../gateway/executor.ts"
@@ -50,6 +50,9 @@ const BUCKETS_PER_WINDOW = 48
 const MIN_BUCKET_MS = 60_000
 const DEFAULT_LOG_LIMIT = 50
 const MAX_LOG_LIMIT = 500
+/** Points drawn in the range selector's overview histogram. */
+const OVERVIEW_POINTS = 120
+const MAX_OVERVIEW_POINTS = 1_000
 /**
  * Deadline for a connection test.
  *
@@ -91,6 +94,25 @@ const optionalNumber = (raw: string | undefined): number | null => {
   if (text === null) return null
   const parsed = Number(text)
   return Number.isFinite(parsed) ? Math.trunc(parsed) : null
+}
+
+/**
+ * Resolve the summarised time range.
+ *
+ * An explicit `from`/`to` pair wins, but only as a pair: a lone bound would silently
+ * produce a range reaching from 1970 or to the heat death of the universe, and the
+ * caller cannot tell which of its two parameters was dropped. A malformed or inverted
+ * pair falls back to the window for the same reason — the alternative is an empty
+ * chart that looks like "no traffic" rather than "bad request".
+ */
+const readRange = (
+  params: { readonly from?: string; readonly to?: string },
+  windowMs: number
+): UsageRange => {
+  const from = optionalNumber(params.from)
+  const to = optionalNumber(params.to)
+  if (from === null || to === null || to <= from) return rangeOf(windowMs)
+  return { from, to }
 }
 
 /**
@@ -365,7 +387,12 @@ export const admin = {
 
   /** Usage rollup plus its bucketed time series, over the requested window. */
   usage: (req: {
-    readonly urlParams: { readonly window?: string; readonly bucket?: string }
+    readonly urlParams: {
+      readonly window?: string
+      readonly from?: string
+      readonly to?: string
+      readonly bucket?: string
+    }
   }): Effect.Effect<
     { readonly summary: UsageSummary; readonly series: ReadonlyArray<UsagePoint> },
     AdminFailure,
@@ -374,14 +401,33 @@ export const admin = {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const windowMs = positiveParam(req.urlParams.window, DEFAULT_WINDOW_MS)
-      const bucketMs = Math.max(
-        MIN_BUCKET_MS,
-        positiveParam(req.urlParams.bucket, Math.floor(windowMs / BUCKETS_PER_WINDOW))
-      )
+      const range = readRange(req.urlParams, windowMs)
+      // The bucket is derived from the selected span rather than the nominal window, so
+      // narrowing the range makes the chart finer instead of leaving it as coarse as the
+      // window it was cut out of.
+      const span = range.to - range.from
+      const bucketMs = Math.max(MIN_BUCKET_MS, positiveParam(req.urlParams.bucket, Math.floor(span / BUCKETS_PER_WINDOW)))
 
-      const rollup = yield* fromStorage("summarising usage", summary(sql, windowMs))
-      const buckets = yield* fromStorage("bucketising usage", series(sql, windowMs, bucketMs))
+      const rollup = yield* fromStorage("summarising usage", summary(sql, range))
+      const buckets = yield* fromStorage("bucketising usage", series(sql, range, bucketMs))
       return { summary: rollup, series: buckets }
+    }),
+
+  usageOverview: (req: {
+    readonly urlParams: { readonly window?: string; readonly points?: string }
+  }): Effect.Effect<
+    { readonly from: number; readonly to: number; readonly series: ReadonlyArray<UsagePoint> },
+    AdminFailure,
+    SqlClient.SqlClient
+  > =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const windowMs = positiveParam(req.urlParams.window, DEFAULT_WINDOW_MS)
+      const points = Math.min(MAX_OVERVIEW_POINTS, integerParam(req.urlParams.points, OVERVIEW_POINTS))
+      const range = rangeOf(windowMs)
+      const bucketMs = Math.max(MIN_BUCKET_MS, Math.floor(windowMs / Math.max(1, points)))
+      const series_ = yield* fromStorage("reading usage overview", series(sql, range, bucketMs))
+      return { from: range.from, to: range.to, series: series_ }
     }),
 
   /** One page of the request log, plus totals over the whole filtered set. */
@@ -667,6 +713,7 @@ export const adminHandlers = HttpApiBuilder.group(api, "admin", (h) =>
     .handle("overview", admin.overview)
     .handle("config", admin.config)
     .handle("usage", admin.usage)
+    .handle("usageOverview", admin.usageOverview)
     .handle("usageLog", admin.usageLog)
     .handle("providerCreate", admin.providerCreate)
     .handle("providerUpdate", admin.providerUpdate)

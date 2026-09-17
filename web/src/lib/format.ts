@@ -64,6 +64,30 @@ export function formatMs(value: number | null | undefined): string {
 }
 
 /**
+ * Generation throughput, in tokens per second.
+ *
+ * Precision is dropped above 100: a chart readout has no use for 137.4 tok/s, and the
+ * extra digits push the line wider than the numbers beside it.
+ */
+export function formatTps(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return DASH
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} tok/s`
+}
+
+/**
+ * The interval a chart readout or a selection covers.
+ *
+ * Clock times for a span inside one day, full dates once it crosses one — a bare
+ * "09:30 – 09:30" cannot say that the second one is tomorrow.
+ */
+export function formatRangeLabel(from: number, to: number): string {
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return DASH
+  return to - from >= 86_400_000
+    ? `${formatDateTime(from)} – ${formatDateTime(to)}`
+    : `${formatClock(from)} – ${formatClock(to)}`
+}
+
+/**
  * A bucket width, in the units an operator reads charts in.
  *
  * `formatMs` is for latencies, where seconds is the right unit; a 30-minute bucket

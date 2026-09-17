@@ -155,6 +155,7 @@ export const COPY = {
     cost: "费用",
     avgLatency: "平均延迟",
     avgTtft: "平均首字延迟",
+    tps: "生成速度",
     time: "时间",
     model: "模型",
     provider: "上游",
@@ -182,11 +183,15 @@ export const COPY = {
     cacheRate: "缓存命中率",
     avgLatency: "平均延迟",
     avgTtft: "平均首字延迟",
+    tps: "生成速度",
+    tpsHint: "输出 Token ÷ (总耗时 − 首字延迟)",
     tokensSaved: "缓存节省 Token"
   },
 
   chart: {
     requests: "请求",
+    throughput: "生成速度",
+    bucketNote: "该时间分桶内的合计",
     errors: "错误",
     noRequests: "该时间窗口内没有请求。",
     requestsOverTime: "请求随时间变化",
@@ -446,6 +451,16 @@ export const COPY = {
     doneButton: "我已保存",
     meter: "限速密钥",
     deleteTitle: (name: string) => `删除密钥 ${name}？`
+  },
+
+  /** The chart's time-range selector. */
+  range: {
+    label: "时间范围选择",
+    wholeWindow: "全部时间范围",
+    dragHint: "拖动选择范围",
+    reset: "重置范围",
+    /** The bucket label is supplied by `formatBucket`, which owns that vocabulary. */
+    bucketSize: (bucket: string) => `每桶 ${bucket}`
   },
 
   usage: {
