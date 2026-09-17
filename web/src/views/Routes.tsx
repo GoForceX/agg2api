@@ -1,19 +1,41 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
-import { api, errorMessage } from "../lib/api.ts"
-import { COPY } from "../lib/copy.ts"
-import { formatDateTime, formatInt } from "../lib/format.ts"
-import { useAdminConfig, useRefreshAdmin } from "../lib/queries.ts"
-import type { ModelCapabilities, ProviderDetail, Route, RouteInput, RouteTarget, RoutingStrategy } from "../lib/types.ts"
-import { Badge, Banner, Card, ConfirmButton, ErrorPanel, Field, Loading, Modal, Toggle } from "../components/ui.tsx"
+import { InfoIcon, PlusIcon, RefreshCwIcon, RouteIcon, TrashIcon } from "lucide-react"
+
+import {
+  ConfirmDelete,
+  ErrorBanner,
+  ErrorPanel,
+  Loading,
+  NumberInput,
+  Panel,
+  PendingButton,
+  ToneBadge
+} from "@/components/common"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { api, errorMessage } from "@/lib/api.ts"
+import { COPY } from "@/lib/copy.ts"
+import { formatDateTime, formatInt } from "@/lib/format.ts"
+import { useAdminConfig, useRefreshAdmin } from "@/lib/queries.ts"
+import type { ModelCapabilities, ProviderDetail, Route, RouteInput, RouteTarget, RoutingStrategy } from "@/lib/types.ts"
 
 type StrategyChoice = "inherit" | RoutingStrategy
-
-const STRATEGY_LABEL: Record<StrategyChoice, string> = {
-  inherit: COPY.routes.inherit,
-  priority: COPY.strategies.priority,
-  weighted: COPY.strategies.weighted
-}
 
 type TargetDraft = {
   provider_id: string
@@ -36,6 +58,18 @@ const EMPTY_ROUTE: RouteDraft = {
   enabled: true,
   display_name: "",
   targets: []
+}
+
+const STRATEGY_ITEMS: ReadonlyArray<{ value: StrategyChoice; label: string }> = [
+  { value: "inherit", label: COPY.routes.inherit },
+  { value: "priority", label: COPY.strategies.priority },
+  { value: "weighted", label: COPY.strategies.weighted }
+]
+
+const SOURCE_LABEL: Record<ModelCapabilities["source"], string> = {
+  upstream: COPY.routes.sourceUpstream,
+  "models.dev": COPY.routes.sourceModelsDev,
+  "models.dev-nearest": COPY.routes.sourceNearest
 }
 
 function routeToDraft(route: Route): RouteDraft {
@@ -123,42 +157,73 @@ export function RoutesView() {
 
   const providers = config.data.providers
   const defaultStrategy = config.data.settings.default_strategy
+  const routes = config.data.routes
+  /** A route with no enabled target cannot serve anything, whatever its own flag says. */
+  const brokenRoutes = routes.filter((route) => !route.targets.some((target) => target.enabled)).length
 
   return (
-    <div className="stack">
-      <div className="view-head">
-        <h1>{COPY.routes.title}</h1>
-        <div className="row-actions">
-          <button type="button" className="btn" disabled={sync.isPending} onClick={() => sync.mutate()}>
-            {sync.isPending ? COPY.action.syncing : COPY.action.sync}
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">{COPY.routes.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            {COPY.routes.strategyLegend(COPY.strategies[defaultStrategy])}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <PendingButton
+            variant="outline"
+            pending={sync.isPending}
+            pendingLabel={COPY.action.syncing}
+            onClick={() => sync.mutate()}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {COPY.action.sync}
+          </PendingButton>
+          <Button onClick={() => setCreating(true)}>
+            <PlusIcon data-icon="inline-start" />
             {COPY.routes.add}
-          </button>
+          </Button>
         </div>
       </div>
 
-      {notice !== null ? <Banner message={notice} onDismiss={() => setNotice(null)} /> : null}
+      {notice !== null ? <ErrorBanner message={notice} onDismiss={() => setNotice(null)} /> : null}
 
-      <p className="muted small">{COPY.routes.strategyLegend(COPY.strategies[defaultStrategy])}</p>
-
-      {config.data.routes.length === 0 ? (
-        <Card>
-          <p className="muted padded">{COPY.routes.empty}</p>
-        </Card>
+      {brokenRoutes > 0 ? (
+        <Alert>
+          <InfoIcon />
+          <AlertTitle>{COPY.routes.brokenTitle(brokenRoutes)}</AlertTitle>
+          <AlertDescription>{COPY.routes.brokenHint}</AlertDescription>
+        </Alert>
       ) : null}
 
-      {config.data.routes.map((route) => (
-        <RouteCard
-          key={route.public_model}
-          route={route}
-          defaultStrategy={defaultStrategy}
-          providers={providers}
-          onEdit={() => setEditing(route)}
-          onToggleEnabled={(enabled) => toggleEnabled.mutate({ route, enabled })}
-          onDelete={() => remove.mutate(route.public_model)}
-        />
-      ))}
+      {routes.length === 0 ? (
+        <Panel>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <RouteIcon />
+              </EmptyMedia>
+              <EmptyTitle>{COPY.state.empty}</EmptyTitle>
+              <EmptyDescription>{COPY.routes.empty}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </Panel>
+      ) : null}
+
+      <div className="flex flex-col gap-4">
+        {routes.map((route) => (
+          <RouteCard
+            key={route.public_model}
+            route={route}
+            defaultStrategy={defaultStrategy}
+            providers={providers}
+            onEdit={() => setEditing(route)}
+            onToggleEnabled={(enabled) => toggleEnabled.mutate({ route, enabled })}
+            onDelete={() => remove.mutate(route.public_model)}
+          />
+        ))}
+      </div>
 
       {creating ? (
         <RouteForm
@@ -209,94 +274,89 @@ function RouteCard({
   const preferred = effective === "priority" ? preferredIndex(route.targets) : -1
   const serving = preferred === -1 ? null : (route.targets[preferred] ?? null)
   const providerName = (id: number) => providers.find((detail) => detail.provider.id === id)?.provider.name ?? `#${id}`
+  const name = route.display_name !== null && route.display_name.length > 0 ? route.display_name : route.public_model
 
   return (
-    <Card
-      title={route.display_name !== null && route.display_name.length > 0 ? route.display_name : route.public_model}
-      subtitle={COPY.routes.cardSubtitle(
-        route.public_model,
-        route.targets.length,
-        formatDateTime(route.updated_at)
-      )}
+    <Panel
+      title={name}
+      subtitle={COPY.routes.cardSubtitle(route.public_model, route.targets.length, formatDateTime(route.updated_at))}
       actions={
         <>
-          <Toggle checked={route.enabled} label={COPY.field.enabled} onChange={onToggleEnabled} />
-          <button type="button" className="btn btn-small" onClick={onEdit}>
+          <ToneBadge tone={route.strategy === null ? "neutral" : "info"}>
+            {STRATEGY_ITEMS.find((item) => item.value === (route.strategy ?? "inherit"))?.label ?? ""}
+          </ToneBadge>
+          {route.strategy === null ? (
+            <span className="text-xs text-muted-foreground">
+              {COPY.routes.resolvedTo(COPY.strategies[defaultStrategy])}
+            </span>
+          ) : null}
+          <Switch
+            checked={route.enabled}
+            aria-label={COPY.routes.enableToggle(route.public_model)}
+            onCheckedChange={onToggleEnabled}
+          />
+          <Button variant="outline" size="sm" onClick={onEdit}>
             {COPY.action.edit}
-          </button>
-          <ConfirmButton
-            onConfirm={onDelete}
+          </Button>
+          <ConfirmDelete
             label={COPY.action.delete}
-            confirmLabel={COPY.action.confirmDelete}
+            title={COPY.routes.deleteTitle(route.public_model)}
+            description={COPY.routes.deleteConfirm}
+            onConfirm={onDelete}
           />
         </>
       }
-      padded
     >
-      <div className="route-meta">
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
         <span>
-          {COPY.column.strategy}{" "}
-          <Badge tone={route.strategy === null ? "neutral" : "info"}>
-            {STRATEGY_LABEL[route.strategy ?? "inherit"]}
-          </Badge>
-        </span>
-        {route.strategy === null ? (
-          <span className="muted small">{COPY.routes.resolvedTo(COPY.strategies[defaultStrategy])}</span>
-        ) : null}
-        <span className="muted small">
           {effective === "priority"
             ? serving === null
               ? COPY.routes.noTargets
               : COPY.routes.servingVia(providerName(serving.provider_id), serving.upstream_model)
-            : COPY.routes.weightedEligible(
-                route.targets.filter((target) => target.enabled).length
-              )}
+            : COPY.routes.weightedEligible(route.targets.filter((target) => target.enabled).length)}
         </span>
       </div>
-
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>{COPY.routes.preferredColumn}</th>
-              <th>{COPY.column.provider}</th>
-              <th>{COPY.field.upstreamModel}</th>
-              <th className="num">{COPY.field.priority}</th>
-              <th>{COPY.field.enabled}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {route.targets.length === 0 ? (
-              <tr>
-                <td className="empty" colSpan={5}>
-                  {COPY.routes.targetsEmpty}
-                </td>
-              </tr>
-            ) : null}
-            {route.targets.map((target, index) => {
-              const isServing = effective === "priority" && index === preferred
-              return (
-                <tr key={`${target.provider_id}-${target.upstream_model}-${index}`}>
-                  <td>
-                    {isServing ? <Badge tone="good">{COPY.routes.serving}</Badge> : <span className="muted">—</span>}
-                  </td>
-                  <td>{providerName(target.provider_id)}</td>
-                  <td className="mono small">{target.upstream_model}</td>
-                  <td className="num">{formatInt(target.priority)}</td>
-                  <td>
-                    {target.enabled ? (
-                      <Badge tone="good">{COPY.state.yes}</Badge>
-                    ) : (
-                      <Badge tone="neutral">{COPY.state.no}</Badge>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{COPY.routes.preferredColumn}</TableHead>
+            <TableHead>{COPY.column.provider}</TableHead>
+            <TableHead>{COPY.field.upstreamModel}</TableHead>
+            <TableHead className="text-right">{COPY.field.priority}</TableHead>
+            <TableHead>{COPY.field.enabled}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {route.targets.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                {COPY.routes.targetsEmpty}
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {route.targets.map((target, index) => {
+            const isServing = effective === "priority" && index === preferred
+            return (
+              <TableRow key={`${target.provider_id}-${target.upstream_model}-${index}`}>
+                <TableCell>
+                  {isServing ? <ToneBadge tone="good">{COPY.routes.serving}</ToneBadge> : <span className="text-muted-foreground">—</span>}
+                </TableCell>
+                <TableCell>{providerName(target.provider_id)}</TableCell>
+                <TableCell className="font-mono text-xs">{target.upstream_model}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatInt(target.priority)}</TableCell>
+                <TableCell>
+                  {target.enabled ? (
+                    <ToneBadge tone="good">{COPY.state.yes}</ToneBadge>
+                  ) : (
+                    <ToneBadge tone="neutral">{COPY.state.no}</ToneBadge>
+                  )}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </Panel>
   )
 }
 
@@ -338,69 +398,102 @@ function RouteForm({
   })
 
   return (
-    <Modal
-      title={title}
-      wide
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn" onClick={onClose}>
-            {COPY.action.cancel}
-          </button>
-          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? COPY.action.saving : existing === true ? COPY.action.save : COPY.action.create}
-          </button>
-        </>
-      }
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
     >
-      {error !== null ? <Banner tone="bad" message={error} onDismiss={() => setError(null)} /> : null}
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{COPY.routes.subtitle}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            save.mutate()
+          }}
+        >
+          {error !== null ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
 
-      <div className="form-grid">
-        <Field label={COPY.field.publicModel} hint={COPY.routes.publicModelHint}>
-          <input
-            className="input mono"
-            value={form.public_model}
-            disabled={existing === true}
-            spellCheck={false}
-            onChange={(event) => patch({ public_model: event.currentTarget.value })}
-          />
-        </Field>
+          <FieldGroup>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="route-model">{COPY.field.publicModel}</FieldLabel>
+                <Input
+                  id="route-model"
+                  className="font-mono"
+                  value={form.public_model}
+                  disabled={existing === true}
+                  spellCheck={false}
+                  onChange={(event) => patch({ public_model: event.currentTarget.value })}
+                />
+                <FieldDescription>{COPY.routes.publicModelHint}</FieldDescription>
+              </Field>
 
-        <Field label={COPY.routes.displayName} hint={COPY.routes.displayNameHint}>
-          <input
-            className="input"
-            value={form.display_name}
-            onChange={(event) => patch({ display_name: event.currentTarget.value })}
-          />
-        </Field>
+              <Field>
+                <FieldLabel htmlFor="route-display">{COPY.routes.displayName}</FieldLabel>
+                <Input
+                  id="route-display"
+                  value={form.display_name}
+                  onChange={(event) => patch({ display_name: event.currentTarget.value })}
+                />
+                <FieldDescription>{COPY.routes.displayNameHint}</FieldDescription>
+              </Field>
+            </div>
 
-        <Field label={COPY.field.strategy} hint={COPY.routes.targetsHint}>
-          <select
-            className="input"
-            value={form.strategy}
-            onChange={(event) => patch({ strategy: event.currentTarget.value as StrategyChoice })}
-          >
-            <option value="inherit">{COPY.routes.inherit}</option>
-            <option value="priority">{COPY.strategies.priority}</option>
-            <option value="weighted">{COPY.strategies.weighted}</option>
-          </select>
-        </Field>
+            <Field>
+              <FieldLabel htmlFor="route-strategy">{COPY.field.strategy}</FieldLabel>
+              <Select
+                items={STRATEGY_ITEMS}
+                value={form.strategy}
+                onValueChange={(value) => patch({ strategy: value as StrategyChoice })}
+              >
+                <SelectTrigger id="route-strategy" className="w-full md:w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {STRATEGY_ITEMS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>{COPY.routes.targetsHint}</FieldDescription>
+            </Field>
 
-        <div className="form-span">
-          <Toggle checked={form.enabled} label={COPY.field.enabled} onChange={(enabled) => patch({ enabled })} />
-        </div>
-      </div>
+            <Field orientation="horizontal">
+              <Switch
+                id="route-enabled"
+                checked={form.enabled}
+                onCheckedChange={(enabled) => patch({ enabled })}
+              />
+              <FieldLabel htmlFor="route-enabled">{COPY.field.enabled}</FieldLabel>
+            </Field>
+          </FieldGroup>
 
-      <h3 className="section-title">{COPY.field.targets}</h3>
-      <TargetEditor targets={form.targets} providers={providers} onChange={(targets) => patch({ targets })} />
-    </Modal>
+          <Separator />
+
+          <h3 className="text-sm font-medium">{COPY.field.targets}</h3>
+          <TargetEditor targets={form.targets} providers={providers} onChange={(targets) => patch({ targets })} />
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {COPY.action.cancel}
+            </Button>
+            <PendingButton type="submit" pending={save.isPending} pendingLabel={COPY.action.saving}>
+              {existing === true ? COPY.action.save : COPY.action.create}
+            </PendingButton>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
-}
-
-const SOURCE_LABEL: Record<ModelCapabilities["source"], string> = {
-  upstream: COPY.routes.sourceUpstream,
-  "models.dev": COPY.routes.sourceModelsDev,
-  "models.dev-nearest": COPY.routes.sourceNearest
 }
 
 /**
@@ -412,19 +505,21 @@ const SOURCE_LABEL: Record<ModelCapabilities["source"], string> = {
  */
 function CapabilityHint({ capabilities }: { capabilities: ModelCapabilities | null }) {
   if (capabilities === null) {
-    return <span className="muted small">{COPY.routes.capabilitiesUnknown}</span>
+    return <span className="text-xs text-muted-foreground">{COPY.routes.capabilitiesUnknown}</span>
   }
   const tags = capabilities.input.filter((modality) => modality !== "text")
   if (capabilities.tool_call === true) tags.push(COPY.routes.capabilityTools)
   if (capabilities.reasoning === true) tags.push(COPY.routes.capabilityReasoning)
   if (capabilities.structured_output === true) tags.push(COPY.routes.capabilityStructured)
   return (
-    <span className="muted small">
+    <span className="text-xs text-muted-foreground">
       {SOURCE_LABEL[capabilities.source]}
       {tags.length > 0 ? ` · ${tags.join(" · ")}` : ""}
     </span>
   )
 }
+
+const NO_PROVIDER = "__none__"
 
 function TargetEditor({
   targets,
@@ -435,94 +530,133 @@ function TargetEditor({
   providers: ProviderDetail[]
   onChange: (next: TargetDraft[]) => void
 }) {
-  const update = (index: number, changes: Partial<TargetDraft>) => {
-    onChange(targets.map((target, at) => (at === index ? { ...target, ...changes } : target)))
-  }
-
   return (
-    <div className="stack">
-      {targets.length === 0 ? (
-        <p className="muted small">{COPY.routes.targetsEmptyHint}</p>
-      ) : null}
+    <div className="flex flex-col gap-3">
+      {targets.length === 0 ? <p className="text-sm text-muted-foreground">{COPY.routes.targetsEmptyHint}</p> : null}
       {targets.map((target, index) => {
         const selected = providers.find((detail) => String(detail.provider.id) === target.provider_id)
         const models = selected?.models ?? []
         const upstreamKnown = models.some((model) => model.upstream_id === target.upstream_model)
+        const update = (changes: Partial<TargetDraft>) =>
+          onChange(targets.map((entry, at) => (at === index ? { ...entry, ...changes } : entry)))
+        const providerItems: ReadonlyArray<{ value: string; label: string }> = [
+          { value: NO_PROVIDER, label: COPY.routes.selectProvider },
+          ...providers.map((detail) => ({
+            value: String(detail.provider.id),
+            label: `${detail.provider.name}${detail.provider.enabled ? "" : COPY.routes.disabledSuffix}`
+          }))
+        ]
+        const modelItems: ReadonlyArray<{ value: string; label: string }> = [
+          {
+            value: "",
+            label:
+              selected === undefined
+                ? COPY.routes.selectProviderFirst
+                : models.length === 0
+                  ? COPY.routes.noDiscoveredModels
+                  : COPY.routes.selectModel
+          },
+          // A value discovery no longer reports is preserved, so editing cannot drop it.
+          ...(target.upstream_model.length > 0 && !upstreamKnown
+            ? [{ value: target.upstream_model, label: COPY.routes.notDiscovered(target.upstream_model) }]
+            : []),
+          ...models.map((model) => ({
+            value: model.upstream_id,
+            label:
+              model.public_id === model.upstream_id
+                ? model.upstream_id
+                : `${model.upstream_id} → ${model.public_id}`
+          }))
+        ]
         return (
-          <div className="target-row" key={index}>
-            <select
-              className="input"
-              value={target.provider_id}
-              onChange={(event) => update(index, { provider_id: event.currentTarget.value, upstream_model: "" })}
+          <div
+            className="grid items-center gap-2 rounded-lg border p-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,10rem)_auto_auto]"
+            key={index}
+          >
+            <Select
+              items={providerItems}
+              value={target.provider_id.length === 0 ? NO_PROVIDER : target.provider_id}
+              onValueChange={(value) =>
+                // Changing the provider invalidates the model: ids are per provider.
+                update({ provider_id: value === null || value === NO_PROVIDER ? "" : value, upstream_model: "" })
+              }
             >
-              <option value="">{COPY.routes.selectProvider}</option>
-              {providers.map((detail) => (
-                <option key={detail.provider.id} value={String(detail.provider.id)}>
-                  {detail.provider.name}
-                  {detail.provider.enabled ? "" : COPY.routes.disabledSuffix}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" aria-label={COPY.field.provider}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {providerItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
 
-            <select
-              className="input mono"
+            <Select
+              items={modelItems}
               value={target.upstream_model}
               disabled={selected === undefined}
-              onChange={(event) => update(index, { upstream_model: event.currentTarget.value })}
+              onValueChange={(value) => update({ upstream_model: value ?? "" })}
             >
-              <option value="">
-                {selected === undefined
-                  ? COPY.routes.selectProviderFirst
-                  : models.length === 0
-                    ? COPY.routes.noDiscoveredModels
-                    : COPY.routes.selectModel}
-              </option>
-              {/* Preserve a value that discovery no longer reports so editing never silently drops it. */}
-              {target.upstream_model.length > 0 && !upstreamKnown ? (
-                <option value={target.upstream_model}>{COPY.routes.notDiscovered(target.upstream_model)}</option>
-              ) : null}
-              {models.map((model) => (
-                <option key={model.upstream_id} value={model.upstream_id}>
-                  {model.upstream_id}
-                  {model.public_id === model.upstream_id ? "" : ` → ${model.public_id}`}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full font-mono" aria-label={COPY.field.upstreamModel}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {modelItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
 
-            <CapabilityHint capabilities={models.find((model) => model.upstream_id === target.upstream_model)?.capabilities ?? null} />
+            <CapabilityHint
+              capabilities={models.find((model) => model.upstream_id === target.upstream_model)?.capabilities ?? null}
+            />
 
-            <input
-              className="input"
-              type="number"
-              value={target.priority}
+            <NumberInput
               aria-label={COPY.field.priority}
-              onChange={(event) => update(index, { priority: event.currentTarget.value })}
+              className="w-20"
+              value={target.priority}
+              onChange={(value) => update({ priority: value })}
             />
 
-            <Toggle
-              checked={target.enabled}
-              label={COPY.field.enabled}
-              onChange={(enabled) => update(index, { enabled })}
-            />
-
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={COPY.routes.removeTarget}
-              onClick={() => onChange(targets.filter((_, at) => at !== index))}
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={target.enabled}
+                aria-label={COPY.field.enabled}
+                onCheckedChange={(enabled) => update({ enabled })}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={COPY.routes.removeTarget}
+                onClick={() => onChange(targets.filter((_, at) => at !== index))}
+              >
+                <TrashIcon />
+              </Button>
+            </div>
           </div>
         )
       })}
-      <button
+      <Button
         type="button"
-        className="btn btn-small"
-        onClick={() => onChange([...targets, { provider_id: "", upstream_model: "", priority: "0", enabled: true }])}
+        variant="outline"
+        size="sm"
+        className="w-fit"
+        onClick={() =>
+          onChange([...targets, { provider_id: "", upstream_model: "", priority: "0", enabled: true }])
+        }
       >
+        <PlusIcon data-icon="inline-start" />
         {COPY.routes.addTarget}
-      </button>
+      </Button>
     </div>
   )
 }

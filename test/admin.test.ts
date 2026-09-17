@@ -414,6 +414,75 @@ describe("admin provider mutations", () => {
     expect(outcome.cleared.input_price).toBeNull()
     expect(Option.getOrThrow(outcome.stored).api_key).toBe("sk-original")
   })
+
+  /**
+   * A masked key sent back unchanged must not replace the stored secret.
+   *
+   * `api_key` and `headers` are each optional in a patch, and the mask is a normal
+   * string — so a client that round-trips what it was shown can send the mask back
+   * with no `headers` field at all. Restoring the stored secret only when `headers`
+   * happened to be present replaced a working credential with "sk-o…", after which
+   * every request to that provider fails and the response still looks fine.
+   *
+   * The test above cannot catch this: it omits `api_key` entirely, which is the
+   * client-side guard, not the server-side one.
+   */
+  test("a masked api_key coming back unchanged does not replace the stored secret", async () => {
+    const outcome = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const created = yield* createProvider(sql, {
+          name: "roundtrip",
+          kind: "openai-chat",
+          base_url: "https://a.example.com",
+          api_key: "sk-original-secret",
+          headers: { authorization: "Bearer header-secret", "x-trace": "keep-me" },
+          priority: 100,
+          max_retries: 0
+        })
+        // What the form posts after a read: the mask it was shown, and nothing else.
+        const shown = yield* admin.providerUpdate({ path: { 0: created.id }, payload: { priority: 300 } })
+        const afterMaskEcho = yield* admin.providerUpdate({
+          path: { 0: created.id },
+          payload: { api_key: shown.api_key, priority: 301 }
+        })
+        // The same echo, with the headers the form was also shown.
+        const afterFullEcho = yield* admin.providerUpdate({
+          path: { 0: created.id },
+          payload: { api_key: afterMaskEcho.api_key, headers: afterMaskEcho.headers, priority: 302 }
+        })
+        const stored = yield* getProvider(sql, created.id)
+        return { afterMaskEcho, stored }
+      })
+    )
+
+    const stored = Option.getOrThrow(outcome.stored)
+    expect(stored.api_key).toBe("sk-original-secret")
+    expect(stored.headers["authorization"]).toBe("Bearer header-secret")
+    expect(stored.headers["x-trace"]).toBe("keep-me")
+    expect(stored.priority).toBe(302)
+    // The response still reports only the mask.
+    expect(outcome.afterMaskEcho.api_key).not.toBe("sk-original-secret")
+  })
+
+  test("a genuinely new api_key replaces the stored one", async () => {
+    const outcome = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const created = yield* createProvider(sql, {
+          name: "rotate",
+          kind: "openai-chat",
+          base_url: "https://a.example.com",
+          api_key: "sk-original-secret",
+          priority: 100,
+          max_retries: 0
+        })
+        yield* admin.providerUpdate({ path: { 0: created.id }, payload: { api_key: "sk-rotated" } })
+        return yield* getProvider(sql, created.id)
+      })
+    )
+    expect(Option.getOrThrow(outcome).api_key).toBe("sk-rotated")
+  })
 })
 
 describe("admin.usageLog", () => {

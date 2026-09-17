@@ -65,6 +65,7 @@ export const COPY = {
     name: "名称",
     enabled: "启用",
     kind: "类型",
+    provider: "上游",
     baseUrl: "接口地址",
     apiKey: "API 密钥",
     priority: "优先级",
@@ -86,6 +87,7 @@ export const COPY = {
 
   action: {
     create: "新建",
+    addFirst: "立即添加",
     add: "添加",
     edit: "编辑",
     save: "保存",
@@ -113,6 +115,8 @@ export const COPY = {
     previous: "上一页",
     next: "下一页",
     addEntry: "添加一项",
+    copySecret: "复制密钥",
+    retryLabel: "重试",
     removeEntry: (name: string) => `移除 ${name}`
   },
 
@@ -260,6 +264,7 @@ export const COPY = {
     cacheBarLabel: (rate: string) => `输入缓存命中率 ${rate}`,
     cacheNote: (cached: string, prompt: string) => `${prompt} 个输入 Token 中有 ${cached} 个来自上游缓存。`,
     noUsage: "暂无用量数据。",
+    noEnabledProvider: "没有启用任何上游",
     aggregateKey: "分组"
   },
 
@@ -281,8 +286,8 @@ export const COPY = {
     discoverResult: (id: number, added: number, removed: number, total: number) =>
       `上游 ${id}：新增 ${added} 个模型，移除 ${removed} 个，共 ${total} 个`,
     discoverFailed: "拉取失败",
-    testOk: (model: string, latency: string, reply: string) => `连通正常 · ${model} · ${latency} · “${reply}”`,
-    testFailed: (model: string, message: string) => `连接失败 · ${model}：${message}`,
+    testOk: (latency: string, reply: string) => `连通正常 · ${latency} · “${reply}”`,
+    testFailed: (message: string) => `连接失败：${message}`,
     deleteConfirm: "删除该上游会同时移除它在所有路由中的引用。确定删除吗？",
     breaker: "熔断",
     lastError: "最近错误",
@@ -313,6 +318,18 @@ export const COPY = {
     enableToggle: (name: string) => `启用 ${name}`,
     lastSuccessAt: (time: string) => `成功 ${time}`,
     noSuccess: "还没有成功记录",
+    breakerHint: "连续失败后上游会被暂时移出候选；冷却结束后自动恢复",
+    breakerState: (
+      breaker: { state: "open" | "degraded" | "healthy"; cooldownMs: number },
+      failures: number,
+      humanize: (seconds: number) => string
+    ): string =>
+      breaker.state === "open"
+        ? `熔断中 · 剩余 ${humanize(breaker.cooldownMs / 1000)}`
+        : failures > 0
+          ? `失败 ${failures} 次`
+          : "正常",
+    deleteTitle: (name: string) => `删除上游 ${name}？`,
     noCreditSnapshot: "还没有余额数据，点击“刷新余额”获取。",
     noAccounts: "上游没有返回任何账户。",
     healthyAccountsLabel: "可用账户",
@@ -342,6 +359,7 @@ export const COPY = {
     modelDenyPlaceholder: "*-preview\n*-audio-*",
     /** Shown when models.dev is unreachable, so null capabilities are explained. */
     capabilitiesIndexMissing: "models.dev 未加载，无法推断模型能力",
+    capabilitiesIndexLocation: "模型能力只能来自上游自报，未收录的模型会显示为“能力未知”。",
     priceNote: (currency: string) => `价格按每百万 Token 计；用量费用以 ${currency} 结算。`
   },
 
@@ -390,7 +408,11 @@ export const COPY = {
     sourceNearest: "models.dev 推断",
     capabilityTools: "工具",
     capabilityReasoning: "推理",
-    capabilityStructured: "结构化输出"
+    capabilityStructured: "结构化输出",
+    enableToggle: (model: string) => `启用路由 ${model}`,
+    deleteTitle: (model: string) => `删除路由 ${model}？`,
+    brokenTitle: (count: number) => `${count} 个路由没有启用的目标上游`,
+    brokenHint: "这些路由上的请求会因为找不到可用上游而失败。"
   },
 
   keys: {
@@ -411,6 +433,7 @@ export const COPY = {
     clipboardUnavailable: "无法访问剪贴板——请选中输入框手动复制。",
     countTitle: (count: number) => `${count} 个密钥`,
     rpm: "限速",
+    metered: "部分限速",
     allModels: "全部模型",
     unlimited: "不限速",
     createdAt: (time: string) => `创建于 ${time}`,
@@ -420,7 +443,9 @@ export const COPY = {
     secretImmutable: "密钥本身无法修改或再次查看；如需轮换请删除后重建。",
     namePlaceholder: "prod-app",
     modelsPlaceholder: "gpt-4o\nclaude-*",
-    doneButton: "我已保存"
+    doneButton: "我已保存",
+    meter: "限速密钥",
+    deleteTitle: (name: string) => `删除密钥 ${name}？`
   },
 
   usage: {

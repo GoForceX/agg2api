@@ -3,7 +3,7 @@
  * text) is what survives editing; `ProviderInput` is what the API accepts, and
  * an omitted `api_key` means "keep the stored secret".
  */
-import type { PairEntry } from "../components/ui.tsx"
+import type { PairEntry } from "../components/common.tsx"
 import type { Provider, ProviderInput, ProviderKind } from "./types.ts"
 
 export type ProviderDraft = {

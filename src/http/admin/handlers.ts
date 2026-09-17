@@ -450,22 +450,26 @@ export const admin = {
           : { base_url: yield* normaliseBaseUrl(req.payload.base_url) })
       }
 
-      // The edit form round-trips every field it was shown, and credentials are shown
+      // An edit form round-trips every field it was shown, and credentials are shown
       // masked — so an untouched credential arrives back as its own mask. Writing that
       // through would replace a working secret with "sk-a…" and silently break the
-      // provider, so a value that is exactly the mask of the stored one means "unchanged".
+      // provider, so a value that is exactly the mask of the *stored* one means
+      // "unchanged" and is restored. Anything else — a new secret, or a deliberate
+      // clear to "" — is left alone.
       const existing = yield* fromStorage(`loading provider ${id}`, getProvider(sql, id))
+      const restoreApiKey =
+        Option.isSome(existing) && normalised.api_key === maskApiKey(existing.value.api_key)
       const payload =
-        Option.isNone(existing) || normalised.headers === undefined
+        Option.isNone(existing)
           ? normalised
           : {
               ...normalised,
-              headers: unmaskUnchangedHeaders(normalised.headers, existing.value.headers),
-              // Same rule for the key itself, so a client that does not guard it cannot
-              // overwrite the secret either.
-              ...(normalised.api_key === maskApiKey(existing.value.api_key)
-                ? { api_key: existing.value.api_key }
-                : {})
+              // Each credential is restored independently: an edit that never touched
+              // `headers` must still have its key protected, and vice versa.
+              ...(normalised.headers === undefined
+                ? {}
+                : { headers: unmaskUnchangedHeaders(normalised.headers, existing.value.headers) }),
+              ...(restoreApiKey ? { api_key: existing.value.api_key } : {})
             }
       const updated = yield* fromStorage(`updating provider ${id}`, updateProvider(sql, id, payload))
       if (Option.isNone(updated)) return yield* Effect.fail(notFound(`provider ${id} does not exist`))

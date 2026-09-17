@@ -372,8 +372,10 @@ Provider and client-key secrets are never returned — keys are masked.
 
 ## Dashboard
 
-A React + TanStack Query single-page app (hash-routed, no SSR), served from
-`web/dist` at `/admin/`. Five views:
+A React + TanStack Query single-page app (hash-routed, no SSR), styled with
+[shadcn/ui](https://ui.shadcn.com) on Base UI and served from `web/dist` at `/admin/`.
+Components are vendored into `web/src/components/ui` rather than installed as a
+dependency, so the theme and every primitive are editable in-tree. Five views:
 
 - **Dashboard** — provider health, model/route/key counts, total credits, and for a
   chosen window: requests, errors, tokens, **cache rate**, latency, and cost, with a
@@ -481,7 +483,7 @@ src/
     admin/handlers.ts  admin endpoints
     static.ts          admin UI hosting
   main.ts              boot and layer assembly
-web/                   React + TanStack admin SPA (built to web/dist)
+web/                   React + TanStack + shadcn admin SPA (built to web/dist)
 ```
 
 Built on **Effect** for typed effects, structured concurrency and interruption —

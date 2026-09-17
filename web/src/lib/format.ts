@@ -120,10 +120,17 @@ export function formatAgo(ts: number | null | undefined): string {
   return `${formatDuration(delta / 1000)}前`
 }
 
-/** Breaker state: open, degraded, or healthy. */
-export function breakerLabel(openUntil: number, failures: number): string {
-  const remaining = openUntil - Date.now()
-  if (remaining > 0) return `熔断中 · 剩余 ${formatDuration(remaining / 1000)}`
-  if (failures > 0) return `失败 ${failures} 次`
-  return COPY.state.ok
+/**
+ * Breaker state as a value rather than a sentence.
+ *
+ * The badge and its tone are chosen together, so returning formatted text meant the
+ * caller had to re-derive which of the three states produced it. `cooldownMs` is what
+ * is left, so a caller can render the remaining time itself.
+ */
+export type BreakerState = { state: "open" | "degraded" | "healthy"; cooldownMs: number }
+
+export function breakerState(openUntil: number): BreakerState {
+  const cooldownMs = openUntil - Date.now()
+  if (cooldownMs > 0) return { state: "open", cooldownMs }
+  return { state: "healthy", cooldownMs: 0 }
 }

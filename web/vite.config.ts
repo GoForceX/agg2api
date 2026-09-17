@@ -1,4 +1,6 @@
+import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
+import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 
 /**
@@ -8,7 +10,12 @@ import react from "@vitejs/plugin-react"
  */
 export default defineConfig({
   base: "/admin/",
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  // shadcn writes `@/…` imports; tsconfig declares the alias for the type checker,
+  // but Vite needs its own resolution map or Rollup cannot find the modules.
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) }
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true

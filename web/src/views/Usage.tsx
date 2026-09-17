@@ -1,22 +1,34 @@
 import { useMemo, useState } from "react"
-import { COPY } from "../lib/copy.ts"
-import { formatCompact, formatCost, formatDateTime, formatInt, formatBucket, formatMs } from "../lib/format.ts"
-import { parseUsageLog } from "../lib/log.ts"
-import { WINDOWS, useAdminConfig, useUsage, useUsageLog } from "../lib/queries.ts"
-import type { UsageLogRow } from "../lib/types.ts"
-import { BarChart } from "../components/BarChart.tsx"
-import { AggregateTable } from "./Dashboard.tsx"
-import { Badge, Card, ErrorPanel, Field, Loading, Pagination, Stat, Toggle } from "../components/ui.tsx"
+import { ActivityIcon, RefreshCwIcon } from "lucide-react"
+
+import { AggregateTable } from "@/components/AggregateTable"
+import { BarChart } from "@/components/BarChart"
+import { ErrorPanel, Loading, Panel, PendingButton, Stat, ToneBadge } from "@/components/common"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { COPY } from "@/lib/copy.ts"
+import {
+  formatBucket,
+  formatCompact,
+  formatCost,
+  formatDateTime,
+  formatInt,
+  formatMs
+} from "@/lib/format.ts"
+import { parseUsageLog } from "@/lib/log.ts"
+import { WINDOWS, useAdminConfig, useUsage, useUsageLog } from "@/lib/queries.ts"
+import type { UsageLogRow } from "@/lib/types.ts"
 
 const PAGE_SIZE = 50
+const ALL = "__all__"
 
 type Tab = "model" | "provider" | "key"
-
-const TAB_LABEL: Record<Tab, string> = {
-  model: COPY.usage.byModel,
-  provider: COPY.usage.byProvider,
-  key: COPY.usage.byKey
-}
 
 export function UsageView() {
   const config = useAdminConfig()
@@ -59,48 +71,75 @@ export function UsageView() {
     return [...names].sort((left, right) => left.localeCompare(right))
   }, [config.data])
 
+  const modelItems: ReadonlyArray<{ value: string; label: string }> = [
+    { value: ALL, label: COPY.usage.allModels },
+    ...modelOptions.map((name) => ({ value: name, label: name }))
+  ]
+  const providerItems: ReadonlyArray<{ value: string; label: string }> = [
+    { value: ALL, label: COPY.usage.allProviders },
+    ...(config.data?.providers ?? []).map((detail) => ({
+      value: String(detail.provider.id),
+      label: detail.provider.name
+    }))
+  ]
+
+  const totalPages = Math.max(1, Math.ceil((log.data?.total ?? 0) / PAGE_SIZE))
+
   return (
-    <div className="stack">
-      <div className="view-head">
-        <h1>{COPY.usage.title}</h1>
-        <div className="row-actions">
-          <label className="inline-field">
-            <span className="field-label">{COPY.usage.window}</span>
-            <select
-              className="input"
-              value={windowId}
-              onChange={(event) => {
-                setWindowId(event.currentTarget.value)
-                setPage(0)
-              }}
-            >
-              {WINDOWS.map((window) => (
-                <option key={window.id} value={window.id}>
-                  {window.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="btn" onClick={() => void usage.refetch()}>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">{COPY.usage.title}</h1>
+          <p className="text-sm text-muted-foreground">{COPY.usage.subtitle}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            items={WINDOWS.map((window) => ({ value: window.id, label: window.label }))}
+            value={windowId}
+            onValueChange={(value) => {
+              setWindowId(value ?? WINDOWS[1].id)
+              setPage(0)
+            }}
+          >
+            <SelectTrigger className="w-32" aria-label={COPY.usage.window}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {WINDOWS.map((window) => (
+                  <SelectItem key={window.id} value={window.id}>
+                    {window.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <PendingButton
+            variant="outline"
+            pending={usage.isFetching}
+            pendingLabel={COPY.state.loading}
+            onClick={() => void usage.refetch()}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
             {COPY.action.refresh}
-          </button>
+          </PendingButton>
         </div>
       </div>
 
-      <Card
+      <Panel
         title={COPY.usage.totalsLast(selected.label)}
         subtitle={COPY.usage.bucketEvery(formatBucket(selected.bucketMs))}
-        padded
+        bodyClassName="p-4"
       >
         {usage.isPending ? (
           <Loading label={COPY.state.loadingUsage} />
         ) : usage.isError ? (
           <ErrorPanel error={usage.error} onRetry={() => void usage.refetch()} />
         ) : summary === undefined ? (
-          <p className="muted">{COPY.usage.empty}</p>
+          <p className="text-sm text-muted-foreground">{COPY.usage.empty}</p>
         ) : (
-          <>
-            <div className="stat-grid">
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
               <Stat label={COPY.metric.requests} value={formatInt(summary.requests)} />
               <Stat
                 label={COPY.metric.errors}
@@ -123,151 +162,189 @@ export function UsageView() {
               <Stat label={COPY.metric.avgLatency} value={formatMs(summary.avg_latency_ms)} />
               <Stat label={COPY.metric.avgTtft} value={formatMs(summary.avg_ttft_ms)} />
             </div>
-            <h3 className="section-title">{COPY.chart.requestsOverTime}</h3>
-            <BarChart points={usage.data?.series ?? []} label={COPY.chart.label(selected.label)} />
-          </>
-        )}
-      </Card>
-
-      <Card
-        title={COPY.usage.breakdown}
-        actions={
-          <div className="tabs" role="tablist">
-            {(["model", "provider", "key"] as Tab[]).map((id) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                className={tab === id ? "tab tab-active" : "tab"}
-                onClick={() => setTab(id)}
-              >
-                {TAB_LABEL[id]}
-              </button>
-            ))}
+            <div className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">{COPY.chart.requestsOverTime}</h3>
+              <BarChart points={usage.data?.series ?? []} label={COPY.chart.label(selected.label)} />
+            </div>
           </div>
-        }
-        padded
-      >
-        {summary === undefined ? (
-          <p className="muted">{COPY.usage.empty}</p>
-        ) : tab === "model" ? (
-          <AggregateTable rows={summary.by_model} empty={COPY.usage.noModelTraffic} />
-        ) : tab === "provider" ? (
-          <AggregateTable rows={summary.by_provider} empty={COPY.dashboard.noProviderTraffic} />
-        ) : (
-          <AggregateTable rows={summary.by_key} empty={COPY.usage.noKeyTraffic} />
         )}
-      </Card>
+      </Panel>
 
-      <Card
+      <Panel title={COPY.usage.breakdown}>
+        {summary === undefined ? (
+          <div className="p-4">
+            <p className="text-sm text-muted-foreground">{COPY.usage.empty}</p>
+          </div>
+        ) : (
+          <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="gap-0">
+            <div className="border-b p-2">
+              <TabsList>
+                <TabsTrigger value="model">{COPY.usage.byModel}</TabsTrigger>
+                <TabsTrigger value="provider">{COPY.usage.byProvider}</TabsTrigger>
+                <TabsTrigger value="key">{COPY.usage.byKey}</TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="model">
+              <AggregateTable rows={summary.by_model} empty={COPY.usage.noModelTraffic} />
+            </TabsContent>
+            <TabsContent value="provider">
+              <AggregateTable rows={summary.by_provider} empty={COPY.dashboard.noProviderTraffic} />
+            </TabsContent>
+            <TabsContent value="key">
+              <AggregateTable rows={summary.by_key} empty={COPY.usage.noKeyTraffic} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </Panel>
+
+      <Panel
         title={COPY.usage.log}
         subtitle={COPY.usage.logHint}
         actions={
-          <button type="button" className="btn btn-small" onClick={() => void log.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void log.refetch()}>
+            <RefreshCwIcon data-icon="inline-start" />
             {COPY.action.refresh}
-          </button>
+          </Button>
         }
       >
-        <div className="filter-bar">
-          <Field label={COPY.column.model}>
-            <select
-              className="input"
-              value={model}
-              onChange={(event) => applyFilter(() => setModel(event.currentTarget.value))}
+        <div className="flex flex-wrap items-end gap-4 border-b p-4">
+          <Field className="w-56">
+            <FieldLabel htmlFor="log-model">{COPY.column.model}</FieldLabel>
+            <Select
+              items={modelItems}
+              value={model.length === 0 ? ALL : model}
+              onValueChange={(value) => applyFilter(() => setModel(value === null || value === ALL ? "" : value))}
             >
-              <option value="">{COPY.usage.allModels}</option>
-              {modelOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="log-model" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {modelItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </Field>
 
-          <Field label={COPY.column.provider}>
-            <select
-              className="input"
-              value={providerId}
-              onChange={(event) => applyFilter(() => setProviderId(event.currentTarget.value))}
+          <Field className="w-48">
+            <FieldLabel htmlFor="log-provider">{COPY.column.provider}</FieldLabel>
+            <Select
+              items={providerItems}
+              value={providerId.length === 0 ? ALL : providerId}
+              onValueChange={(value) =>
+                applyFilter(() => setProviderId(value === null || value === ALL ? "" : value))
+              }
             >
-              <option value="">{COPY.usage.allProviders}</option>
-              {(config.data?.providers ?? []).map((detail) => (
-                <option key={detail.provider.id} value={String(detail.provider.id)}>
-                  {detail.provider.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="log-provider" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {providerItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </Field>
 
-          <div className="filter-toggle">
-            <Toggle
+          <Field orientation="horizontal" className="w-auto pb-1">
+            <Switch
+              id="log-errors"
               checked={errorsOnly}
-              label={COPY.usage.onlyErrors}
-              onChange={(next) => applyFilter(() => setErrorsOnly(next))}
+              onCheckedChange={(next) => applyFilter(() => setErrorsOnly(next))}
             />
-          </div>
+            <FieldLabel htmlFor="log-errors">{COPY.usage.onlyErrors}</FieldLabel>
+          </Field>
         </div>
 
         {log.isError ? (
           <ErrorPanel error={log.error} onRetry={() => void log.refetch()} />
+        ) : rows.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <ActivityIcon />
+              </EmptyMedia>
+              <EmptyTitle>{COPY.state.empty}</EmptyTitle>
+              <EmptyDescription>{log.isPending ? COPY.state.loading : COPY.usage.noLog}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          <>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{COPY.column.time}</th>
-                    <th>{COPY.usage.requestId}</th>
-                    <th>{COPY.column.endpoint}</th>
-                    <th>{COPY.column.model}</th>
-                    <th>{COPY.column.provider}</th>
-                    <th className="num">{COPY.column.promptTokens}</th>
-                    <th className="num">{COPY.column.completionTokens}</th>
-                    <th className="num">{COPY.column.cachedTokens}</th>
-                    <th className="num">{COPY.column.cost}</th>
-                    <th className="num">{COPY.column.attempts}</th>
-                    <th>{COPY.column.status}</th>
-                    <th className="num">{COPY.column.latency}</th>
-                    <th className="num">{COPY.usage.ttft}</th>
-                    <th>{COPY.column.clientKey}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 ? (
-                    <tr>
-                      <td className="empty" colSpan={14}>
-                        {log.isPending ? COPY.state.loading : COPY.usage.noLog}
-                      </td>
-                    </tr>
-                  ) : null}
-                  {rows.map((row) => (
-                    <LogRowView key={row.request_id} row={row} />
-                  ))}
-                </tbody>
-                {log.data !== undefined ? (
-                  <tfoot>
-                    <tr>
-                      <td colSpan={5}>{COPY.usage.filteredTotals(formatInt(log.data.total))}</td>
-                      <td className="num">{formatCompact(log.data.totals.prompt_tokens)}</td>
-                      <td className="num">{formatCompact(log.data.totals.completion_tokens)}</td>
-                      <td className="num">{formatCompact(log.data.totals.cached_tokens)}</td>
-                      <td className="num">{formatCost(log.data.totals.cost)}</td>
-                      <td colSpan={5} />
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
-            <Pagination
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={log.data?.total ?? 0}
-              onPage={setPage}
-            />
-          </>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{COPY.column.time}</TableHead>
+                  <TableHead>{COPY.usage.requestId}</TableHead>
+                  <TableHead>{COPY.column.endpoint}</TableHead>
+                  <TableHead>{COPY.column.model}</TableHead>
+                  <TableHead>{COPY.column.provider}</TableHead>
+                  <TableHead className="text-right">{COPY.column.promptTokens}</TableHead>
+                  <TableHead className="text-right">{COPY.column.completionTokens}</TableHead>
+                  <TableHead className="text-right">{COPY.column.cachedTokens}</TableHead>
+                  <TableHead className="text-right">{COPY.column.cost}</TableHead>
+                  <TableHead className="text-right">{COPY.column.attempts}</TableHead>
+                  <TableHead>{COPY.column.status}</TableHead>
+                  <TableHead className="text-right">{COPY.column.latency}</TableHead>
+                  <TableHead className="text-right">{COPY.usage.ttft}</TableHead>
+                  <TableHead>{COPY.column.clientKey}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <LogRowView key={row.request_id} row={row} />
+                ))}
+              </TableBody>
+              {log.data !== undefined ? (
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={5}>{COPY.usage.filteredTotals(formatInt(log.data.total))}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCompact(log.data.totals.prompt_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCompact(log.data.totals.completion_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCompact(log.data.totals.cached_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCost(log.data.totals.cost)}</TableCell>
+                    <TableCell colSpan={5} />
+                  </TableRow>
+                </TableFooter>
+              ) : null}
+            </Table>
+          </div>
         )}
-      </Card>
+
+        {rows.length === 0 ? null : (
+          <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              {COPY.pager.pageOf(page + 1, totalPages)}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
+                {COPY.action.previous}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page + 1 >= totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                {COPY.action.next}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Panel>
     </div>
   )
 }
@@ -275,38 +352,47 @@ export function UsageView() {
 function LogRowView({ row }: { row: UsageLogRow }) {
   const failed = row.status >= 400 || row.error_kind !== null
   return (
-    <tr className={failed ? "row-failed" : undefined}>
-      <td className="small">{formatDateTime(row.ts)}</td>
-      <td className="mono small" title={row.request_id}>
+    <TableRow className={failed ? "bg-destructive/5" : undefined}>
+      <TableCell className="text-xs whitespace-nowrap">{formatDateTime(row.ts)}</TableCell>
+      <TableCell className="font-mono text-xs" title={row.request_id}>
         {row.request_id.slice(0, 8)}
         {row.stream ? " ⇢" : ""}
-      </td>
-      <td className="small">{row.endpoint}</td>
-      <td className="mono small">{row.public_model}</td>
-      <td className="small">{row.provider_name ?? "—"}</td>
-      <td className="num">{formatInt(row.prompt_tokens)}</td>
-      <td className="num">{formatInt(row.completion_tokens)}</td>
-      <td className="num">{formatInt(row.cached_tokens)}</td>
-      <td className="num">{formatCost(row.cost)}</td>
-      <td className="num">{formatInt(row.attempts)}</td>
-      <td>
+      </TableCell>
+      <TableCell className="text-xs">{row.endpoint}</TableCell>
+      <TableCell className="font-mono text-xs">{row.public_model}</TableCell>
+      <TableCell className="text-xs">{row.provider_name ?? "—"}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatInt(row.prompt_tokens)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatInt(row.completion_tokens)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatInt(row.cached_tokens)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatCost(row.cost)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatInt(row.attempts)}</TableCell>
+      <TableCell>
         {failed ? (
-          <span className="cell-stack">
-            <Badge tone="bad">{formatInt(row.status)}</Badge>
-            {row.error_kind !== null ? <span className="small danger">{row.error_kind}</span> : null}
-            {row.error_message !== null ? (
-              <span className="muted small" title={row.error_message}>
-                {row.error_message}
-              </span>
+          <div className="flex flex-col gap-1">
+            <ToneBadge tone="bad">{formatInt(row.status)}</ToneBadge>
+            {row.error_kind !== null ? (
+              <span className="text-xs text-destructive">{row.error_kind}</span>
             ) : null}
-          </span>
+            {row.error_message !== null ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="max-w-48 truncate text-xs text-muted-foreground">
+                      {row.error_message}
+                    </span>
+                  }
+                />
+                <TooltipContent>{row.error_message}</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
         ) : (
-          <Badge tone="good">{formatInt(row.status)}</Badge>
+          <ToneBadge tone="good">{formatInt(row.status)}</ToneBadge>
         )}
-      </td>
-      <td className="num">{formatMs(row.latency_ms)}</td>
-      <td className="num">{formatMs(row.ttft_ms)}</td>
-      <td className="small">{row.api_key_name ?? "—"}</td>
-    </tr>
+      </TableCell>
+      <TableCell className="text-right tabular-nums">{formatMs(row.latency_ms)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatMs(row.ttft_ms)}</TableCell>
+      <TableCell className="text-xs">{row.api_key_name ?? "—"}</TableCell>
+    </TableRow>
   )
 }
